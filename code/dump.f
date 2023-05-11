@@ -1,6 +1,14 @@
 c-----------------------------------------------------------------------
       subroutine dump_global(a,n,fname,wk1,wk2,nid)
 
+      ! dump a distributed real array to a file
+
+      ! a       := real data array
+      ! n       := number of local entries to dump
+      ! fname   := file name
+      ! wk1,wk2 := work arrays
+      ! nid     := processor id
+
       real a(n),wk1(1),wk2(1)
 
       character*128 fname
@@ -18,6 +26,13 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       subroutine idump_serial(a,n,fname,nid)
+
+      ! dump an integer array to a file
+
+      ! a       := integer data array
+      ! n       := number of entries to dump
+      ! fname   := file name
+      ! nid     := processor id
 
       integer a(n)
 
@@ -38,6 +53,13 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine dump_serial(a,n,fname,nid)
 
+      ! dump a real array to a file
+
+      ! a       := integer data array
+      ! n       := number of entries to dump
+      ! fname   := file name
+      ! nid     := processor id
+
       real a(n)
 
       character*128 fname
@@ -56,6 +78,14 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       subroutine dump_global_helper(a,n,fname,wk1,wk2,nid)
+
+      ! helper routine to dump_global
+
+      ! a       := integer data array
+      ! n       := number of local entries to dump
+      ! fname   := file name
+      ! wk1,wk2 := work arrays
+      ! nid     := processor id
 
       real a(n),wk1(1),wk2(1)
       integer iwk(1)
@@ -99,6 +129,12 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine idump_serial_helper(a,n,fname)
 
+      ! helper routine for idump_serial
+
+      ! a       := integer data array
+      ! n       := number of entries to dump
+      ! fname   := file name
+
       integer a(n)
 
       character*128 fname
@@ -115,6 +151,12 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       subroutine dump_serial_helper(a,n,fname)
+
+      ! helper routine for dump_serial
+
+      ! a       := real data array
+      ! n       := number of entries to dump
+      ! fname   := file name
 
       real a(n)
 
@@ -134,6 +176,8 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine dump_all
 
+      ! dump 'all' operators and data
+
       include 'SIZE'
       include 'TOTAL'
       include 'MOR'
@@ -148,7 +192,6 @@ c-----------------------------------------------------------------------
       dump_time=dnekclock()
 
       if (ifpod(1)) then
-         call dump_serial(ug(1,1,1),ls*ls,'ops/gu ',nid)
          call dump_serial(au0,(nb+1)**2,'ops/au ',nid)
          call dump_serial(bu0,(nb+1)**2,'ops/bu ',nid)
          call dump_serial(u,(nb+1)*3,'ops/u ',nid)
@@ -170,7 +213,6 @@ c-----------------------------------------------------------------------
       endif
 
       if (ifpod(2)) then
-         call dump_serial(ug(1,1,2),ls*ls,'ops/gt ',nid)
          call dump_serial(at0,(nb+1)**2,'ops/at ',nid)
          call dump_serial(bt0,(nb+1)**2,'ops/bt ',nid)
          call dump_serial(ut,(nb+1)*3,'ops/t ',nid)
@@ -184,13 +226,12 @@ c-----------------------------------------------------------------------
 
       if (ifforce)  call dump_serial(rf,nb,'ops/rf ',nid)
       if (ifsource) call dump_serial(rq,nb,'ops/rq ',nid)
-      if (ifbuoy)   call dump_serial(but0,(nb+1)**2,'ops/but ',nid)
 
       if (ifei) then
          l=1
          do j=1,nres
          do i=1,nres
-            sigtmp(l,1)=sigma(i,j)
+            sigtmp(l,1)=mor_sigma(i,j)
             l=l+1
          enddo
          enddo
@@ -213,7 +254,7 @@ c-----------------------------------------------------------------------
          time=i
          itmp=i
          ifxyo=(i.eq.0)
-         call outpost(ub(1,i),vb(1,i),wb(1,i),pb(1,i),tb(1,i),'bas')
+         call outpost(ub(1,i),vb(1,i),wb(1,i),pb(1,i),tb(1,i,1),'bas')
       enddo
 
       istep=itmp
@@ -232,6 +273,8 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       subroutine dump_ops
+
+      ! dump core operators (c out disabled)
 
       include 'SIZE'
       include 'TOTAL'
@@ -252,12 +295,16 @@ c-----------------------------------------------------------------------
 
       if (ifrom(1)) then
          call dump_serial(au0,(nb+1)**2,'ops/au ',nid)
+         if (rmode.eq.'AEQ')
+     $      call dump_serial(aue,nb*(nb+1)**2,'ops/aue ',nid)
          call dump_serial(bu0,(nb+1)**2,'ops/bu ',nid)
 c        call dump_global(cul,ncloc,'ops/cu ',wk1,wk2,nid)
       endif
 
       if (ifrom(2)) then
          call dump_serial(at0,(nb+1)**2,'ops/at ',nid)
+         if (rmode.eq.'AEQ')
+     $      call dump_serial(ate,nb*(nb+1)**2,'ops/ate ',nid)
          call dump_serial(bt0,(nb+1)**2,'ops/bt ',nid)
          call dump_serial(st0,nb+1,'ops/st ',nid)
 c        call dump_global(ctl,ncloc,'ops/ct ',wk1,wk2,nid)
@@ -271,6 +318,8 @@ c        call dump_global(ctl,ncloc,'ops/ct ',wk1,wk2,nid)
 c-----------------------------------------------------------------------
       subroutine dump_bas
 
+      ! dump pod basis
+
       include 'SIZE'
       include 'TOTAL'
       include 'MOR'
@@ -278,12 +327,14 @@ c-----------------------------------------------------------------------
       parameter (lt=lx1*ly1*lz1*lelt)
 
       common /dumpglobal/ wk1(lcloc),wk2(lcloc)
+      common /romdbas/ tmp(lt,ldimt)
 
       logical iftmp1,iftmp2,iftmp3
 
       call nekgsync
       dbas_time=dnekclock()
 
+      n=lx1*ly1*lz1*lelt
       ttmp=time
       itmp=istep
 
@@ -301,7 +352,10 @@ c-----------------------------------------------------------------------
          time=i
          itmp=i
          ifxyo=(i.eq.0)
-         call outpost(ub(1,i),vb(1,i),wb(1,i),pb(1,i),tb(1,i),'bas')
+         do j=1,npscal+1
+            call copy(tmp(1,j),tb(1,i,j),n)
+         enddo
+         call outpost2(ub(1,i),vb(1,i),wb(1,i),pb(1,i),tmp,ldimt,'bas')
       enddo
 
       istep=itmp
@@ -311,36 +365,21 @@ c-----------------------------------------------------------------------
       ifpo=iftmp2
       ifto=iftmp3
 
+      rtmp1(1,1)=nb*1.
+      call dump_serial(rtmp1(1,1),1,'ops/nb ',nid)
+
+      rtmp1(1,1)=nbo*1.
+      call dump_serial(rtmp1(1,1),1,'ops/nbo ',nid)
+
       call nekgsync
       if (nio.eq.0) write (6,*) 'dbas_time:',dnekclock()-dbas_time
 
       return
       end
 c-----------------------------------------------------------------------
-      subroutine dump_gram
-
-      include 'SIZE'
-      include 'TOTAL'
-      include 'MOR'
-
-      call nekgsync
-      dgram_time=dnekclock()
-
-      if (ifpod(1)) then
-         call dump_serial(ug(1,1,1),ls*ls,'ops/gu ',nid)
-      endif
-
-      if (ifpod(2)) then
-         call dump_serial(ug(1,1,2),ls*ls,'ops/gt ',nid)
-      endif
-
-      call nekgsync
-      if (nio.eq.0) write (6,*) 'dgram_time:',dnekclock()-dgram_time
-
-      return
-      end
-c-----------------------------------------------------------------------
       subroutine dump_misc
+
+      ! dump miscellaneous items
 
       include 'SIZE'
       include 'TOTAL'
@@ -383,12 +422,17 @@ c-----------------------------------------------------------------------
       if (ifforce)  call dump_serial(rf,nb,'ops/rf ',nid)
       if (ifsource) call dump_serial(rq,nb,'ops/rq ',nid)
       if (ifbuoy)   call dump_serial(but0,(nb+1)**2,'ops/but ',nid)
+      if (ifedvs)   call dump_serial(edk,ns*(nb+1),'ops/edk ',nid)
+
+      if (ifedvs) then
+         call dump_serial(rbfwt,ns*nb,'ops/rbfwt ',nid)
+      endif
 
       if (ifei) then
          l=1
          do j=1,nres
          do i=1,nres
-            sigtmp(l,1)=sigma(i,j)
+            sigtmp(l,1)=mor_sigma(i,j)
             l=l+1
          enddo
          enddo
@@ -402,6 +446,8 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       subroutine dump_snaps
+
+      ! dump velocity and temperature snapshots
 
       include 'SIZE'
       include 'TOTAL'
@@ -417,7 +463,7 @@ c-----------------------------------------------------------------------
 
       do i=1,ns
          call outpost(us0(1,1,i),us0(1,2,i),us0(1,ldim,i),
-     $      pr,ts0(1,i),'sna')
+     $      pr,ts0(1,i,1),'sna')
          ifxyo=.false.
       enddo
 

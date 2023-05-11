@@ -5,9 +5,14 @@ c-----------------------------------------------------------------------
       include 'TOTAL'
       include 'MOR'
 
+      character*3 rfilter
+
       real rhs(0:lb),rhstmp(0:lb)
       logical ifdebug
       integer chekbc
+
+      rfilter='   '
+      if (cfloc.eq.'POST'.and.cftype.eq.'DIFF') rfilter='EF '
 
       chekbc=0
 
@@ -93,7 +98,7 @@ c-----------------------------------------------------------------------
 
       call count_gal(num_galu,anum_galu,rhs(1),umax,umin,1e-16,nb)
 
-      call shift3(u,rhs,nb+1)
+      call shift(u,rhs,nb+1,3)
 
       ustep_time=ustep_time+dnekclock()-ulast_time
 
@@ -134,7 +139,7 @@ c-----------------------------------------------------------------------
 
       if (nb.eq.0) then
          rhs(0)=1.
-         call shift3(ut,rhs,nb+1)
+         call shift(ut,rhs,nb+1,3)
          return
       endif
 
@@ -197,7 +202,7 @@ c-----------------------------------------------------------------------
 
       call count_gal(num_galt,anum_galt,rhs(1),tmax,tmin,1e-16,nb)
 
-      call shift3(ut,rhs,nb+1)
+      call shift(ut,rhs,nb+1,3)
 
       tstep_time=tstep_time+dnekclock()-tlast_time
 
@@ -325,6 +330,42 @@ c-----------------------------------------------------------------------
       call nekgsync
       postt_time=postt_time+dnekclock()-tttime
 
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine rom_init_params
+
+      include 'SIZE'
+      include 'INPUT'
+
+      if (nid.eq.0) write (6,*) 'rom_init_params has been deprecated...'
+
+      call mor_init_params
+
+      if (param(170).ge.0.) then 
+         call mor_set_params_rea
+      else
+         call mor_set_params_par
+      endif
+
+      call mor_show_params
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine rom_init_fields
+
+      include 'SIZE'
+
+      if (nid.eq.0) write (6,*) 'rom_init_fields has been deprecated...'
+      call mor_init_fields
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine interp_t(scalar,xyz,n,s)
+      real scalar(1),xyz(1),s(1)
+      call interp_s(scalar,s,xyz,n)
       return
       end
 c-----------------------------------------------------------------------

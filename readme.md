@@ -1,41 +1,55 @@
-# Model Order Reduction (MOR)
+# NekROM - Model Order Reduction Framework for Nek5000
 
-[![Build Status](https://travis-ci.com/kent0/MOR.svg?token=nDCiae81x8NojggcMEcA&branch=master)](https://travis-ci.com/kent0/MOR)
+This package include tools to help apply model-order reduction (MOR) to data produced by [Nek5000](https://github.com/Nek5000/Nek5000) to generate reduced-order models (ROM). The generated ROMs can be run either in the Fortran driver embedded inside the Nek5000 userchk subroutine or can be run separately by provided driver scripts in Matlab, Python, and Julia. Users can also provide their own drivers which read the ROM operators and QOI factors from the `ops/` and `qoi/` directories.
 
-To download the baffle case snapshots, go to MOR/bin and run `./gsnaps baf`.
-To download the cyl case snapshots, go to MOR/bin and run `./gsnaps cyl`.
+# Setup & Procedure
 
-For each case run `../../bin/linkc` in a case directory to link the source.
+Set shell variables (in .bashrc for BASH users):
 
-## Code
+```
+export MOR_DIR='/path/to/NekROM'
+export PATH="$MOR_DIR/bin:$PATH"
+```
 
-* rom.f - includes ROM subroutines
-* pod.f - include POD subroutines
-* aux.f - includes auxiliary subroutines
-* dump.f - includes routines that write out ROM states
-* read.f - includes routines that read in ROM states
-* part.f - includes routines used for partitioning scheme
+Required files in NekROM case directory:
 
-## Cases
+- Nek5000 case files e.g., .rea, .map, SIZE
+- $caserom.usr, .usr file specific for NekROM cases (see `$MOR_DIR/examples`)
+- LMOR,      specifies compile-time parameters
+- $case.mor, specifies run-time parameters
+- file.list, contains list of paths to the snapshots (relative path)
 
-### Baffle
+Optional file:
 
-- [1000 snapshots](https://uofi.box.com/shared/static/ktkxit8tblr6mrngwkwb9rhai6rwnqrc.gz)
-- [100 snapshots](https://uofi.box.com/shared/static/bnoflcpf6i6mmofiy4ufmm8gey6t83k1.gz)
+- avg.list, contains list of paths to the average files
 
-### Cylinder
+After ensuring the required files are in the case directory, run `makerom $caserom` to make a Nek5000 executable for ROM.
 
-- [snapshots](https://uofi.box.com/shared/static/insxch1bjvzl4bnzr3lpr1c016i4g75p.gz)
+# Parameters
 
-### Lid-Driven Cavity
+Compile-time parameters (for setting memory allocation size) can be found in `LMOR`.
 
-A 2D case used to reproduce [1].
+- `ls`, maximum number of snapshots
+- `lb`, maximum number of total modes
 
-Domain: x,y \in [-1,1]
-BCs: u(x,y) = \delta (y-1) * (1-x^2)^2
+run-time parameters can be found in `$case.mor`.
 
-The top boundary condition is not the standard uniform velocity for consistency with [1]
+- [general], header for general parameters
+    - `mode`, off = offline, on = online, all = offline + online
+    - `field`, v = velocity, t = temperature, vt = velocity + temperature
+    - `nb`, number of POD modes (must be less than lb, default == lb)
+- [pod], header for pod parameters
+    - `type`, l2 = L^2 POD modes, h10, H^1_0 POD modes
+    - `mode0`, avg = average 0th mode, state = user-defined in ub,vb,wb,tb
+    - `augment`, 0 = no ABM, 1 = 0th interactions, 2 = diagonals, 3 = 1 + 2
+- [qoi], header for qoi parameters
+    - `freq`, frequency of QOI dump, if <1 freq=iostep
+    - `drag`, drag based on OBJ data
 
-- [500 snapshots](https://uofi.box.com/shared/static/f7h48n1jnuc7qx4cbej009m50a5d3skj.gz)
+# Contribution
 
-[1]: Fick, Maday, Patera, Taddei; "A Reduced Basis Technique for Long-Time Unsteady Turbulent Flows"
+Our procedure for updating the code is exclusively through pull requests (no pushing). Please submit issues and PR to github.com/SEAL-UIUC/NekMOR. PRs should be the smallest coherent change to the code-base. Issue titles should describe the issue e.g., 'Error in x', 'Missing x', etc. PR titles should describe the modification made e.g., 'Fixed x', 'Improved x, etc. See conventions.txt for the coding style of this project when contributing.
+
+# Parameter File Support
+
+In addition to the .rea support for setting internal parameters, .mor files are supported for [par](https://nek5000.github.io/NekDoc/user_files.html)-like dictionary. The possible key/values are described in templates/mpar.template.

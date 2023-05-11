@@ -28,7 +28,7 @@ c-----------------------------------------------------------------------
       call rzero(tt,n)
 
       do i=0,nb
-         call add2s2(tt,tb(1,i),coef(i),n)
+         call add2s2(tt,tb(1,i,1),coef(i),n)
       enddo
 
       return
@@ -51,7 +51,7 @@ c-----------------------------------------------------------------------
 
       do j=0,nb
       do i=0,nb
-         call col3(tbt,tb(1,i),tb(1,j),n)
+         call col3(tbt,tb(1,i,1),tb(1,j,1),n)
          call add2s2(tt,tbt,ut2a(1+i+(nb+1)*j),n)
       enddo
       enddo
@@ -79,6 +79,32 @@ c-----------------------------------------------------------------------
             call admcol3(uy,vb(1,i),vb(1,j),u2a(1+i+(nb+1)*j),n)
             if (ldim.eq.3)
      $         call admcol3(uz,wb(1,i),wb(1,j),u2a(1+i+(nb+1)*j),n)
+         enddo
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine reconu_rm2(ux,uy,uz)
+
+      include 'SIZE'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real ux(lt),uy(lt),uz(lt)
+
+      n=lx1*ly1*lz1*nelv
+
+      call opzero(ux,uy,uz)
+
+      do j=0,nb
+         if (nio.eq.0) write (6,*) 'reconu_rms:',j,'/',nb
+         do i=0,nb
+            call admcol3(ux,ub(1,i),vb(1,j),u2a(1+i+(nb+1)*j),n)
+            call admcol3(uy,vb(1,i),wb(1,j),u2a(1+i+(nb+1)*j),n)
+            if (ldim.eq.3)
+     $         call admcol3(uz,wb(1,i),ub(1,j),u2a(1+i+(nb+1)*j),n)
          enddo
       enddo
 
@@ -180,6 +206,26 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
+      subroutine shift(u,v,n,m)
+
+      ! shift v array into u array
+
+      ! u := target array
+      ! v := input array
+      ! n := length of v
+      ! m := number of shifts
+
+      real u(n,m),v(n)
+
+      do i=1,m-1
+         call copy(u(1,m+1-i),u(1,m-i),n)
+      enddo
+
+      call copy(u,v,n)
+
+      return
+      end
+c-----------------------------------------------------------------------
       subroutine shift3(u,v,n)
 
       real u(n,3),v(n)
@@ -211,6 +257,38 @@ c-----------------------------------------------------------------------
 
       call add3(d2u,uxx,uyy,lx1*ly1*lz1*nelv)
       call dsavg(d2u)
+
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine lap3d(d2u,u)
+
+      ! set Laplacian of the input scalar field
+
+      ! d2u := Laplacian field
+      ! u   := input scalar field
+
+      include 'SIZE'
+      include 'TOTAL'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real d2u(1),u(1)
+
+      common /scrl2d/ ux(lt),uy(lt),uz(lt),
+     $                uxx(lt),uyy(lt),uzz(lt),t1(lt),t2(lt)
+
+      n=lx1*ly1*lz1*nelt
+
+      call gradm1(ux,uy,uz,u)
+
+      call gradm1(uxx,t1,t2,ux)
+      call gradm1(t1,uyy,t2,uy)
+      call gradm1(t1,t2,uzz,uz)
+
+      call add3(d2u,uxx,uyy,n)
+      call add2(d2u,uzz,n)
 
       return
       end
@@ -319,7 +397,7 @@ c-----------------------------------------------------------------------
       call opadd2(vx,vy,vz,ux,uy,uz)
       call add2(pr,pp,lx2*ly2*lz2*nelv)
 
-      do idim=1,1
+      do idim=1,ldimt
          call add2(t(1,idim),tt(1,idim),lx1*ly1*lz1*nelt)
       enddo
 
@@ -348,6 +426,7 @@ c-----------------------------------------------------------------------
       subroutine copy_sol(vx,vy,vz,pr,t,ux,uy,uz,pp,tt)
 
       include 'SIZE'
+      include 'INPUT'
 
       parameter (lt1=lx1*ly1*lz1*lelt)
       parameter (lt2=lx2*ly2*lz2*lelt)
@@ -357,72 +436,10 @@ c-----------------------------------------------------------------------
 
       call opcopy(vx,vy,vz,ux,uy,uz)
       call copy(pr,pp,lx2*ly2*lz2*nelv)
-      call copy(t,tt,lx1*ly1*lz1*nelv)
 
-c     do idim=1,ldimt
-c        call copy(t(1,idim),tt(1,idim),lx1*ly1*lz1*nelt)
-c     enddo
-
-      return
-      end
-c-----------------------------------------------------------------------
-      subroutine conv_sol(ux,uy,uz,vx,vy,vz) ! compute convection
-
-      include 'SIZE'
-      include 'INPUT'
-      include 'MASS'
-
-      parameter (lt1=lx1*ly1*lz1*lelt)
-      parameter (lt2=lx2*ly2*lz2*lelt)
-
-      real vx(lt1),vy(lt1),vz(lt1),pr(lt2),t(lt1,ldimt)
-      real ux(lt1),uy(lt1),uz(lt1)
-      common /scrctd/ t1(lt1),t2(lt1),t3(lt1),h1(lt1),h2(lt1)
-
-      n1=lx1*ly1*lz1*nelt
-      n2=lx2*ly2*lz2*nelt
-
-      call setcnv_c(vx,vy,vz)
-      call setcnv_u(vx,vy,vz)
-      call ccu(ux,uy,uz)
-      call opbinv1(ux,uy,uz,ux,uy,uz,1.)
-
-      return
-      end
-c-----------------------------------------------------------------------
-      subroutine ctd_sol(ux,uy,uz,vx,vy,vz,pr,t) ! compute the time-derivative
-
-      include 'SIZE'
-      include 'INPUT'
-      include 'MASS'
-
-      parameter (lt1=lx1*ly1*lz1*lelt)
-      parameter (lt2=lx2*ly2*lz2*lelt)
-
-      real vx(lt1),vy(lt1),vz(lt1),pr(lt2),t(lt1,ldimt)
-      real ux(lt1),uy(lt1),uz(lt1)
-      common /scrctd/ t1(lt1),t2(lt1),t3(lt1),h1(lt1),h2(lt1)
-
-      n1=lx1*ly1*lz1*nelt
-      n2=lx2*ly2*lz2*nelt
-
-      call gradp(ux,uy,uz,pr)
-      call opchsgn(ux,uy,uz)
-      call conv_sol(t1,t2,t3,vx,vy,vz)
-      call opchsgn(t1,t2,t3)
-
-      call opadd2(ux,uy,uz,t1,t2,t3)
-
-      call rone(h1,n1)
-      call rzero(h2,n1)
-
-      call lap2d(t1,vx)
-      call lap2d(t2,vy)
-      if (ldim.eq.3) call lap2d(t3,vz)
-      s=-param(2)
-      call opcmult(t1,t2,t3,s)
-
-      call opadd2(ux,uy,uz,t1,t2,t3)
+      do idim=1,min(1+npscal,ldimt)
+         call copy(t(1,idim),tt(1,idim),lx1*ly1*lz1*nelt)
+      enddo
 
       return
       end
@@ -457,7 +474,7 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      subroutine hyperpar
+      subroutine hyperpar(uuk,ttk)
 
       include 'SIZE'
       include 'MOR'
@@ -466,6 +483,7 @@ c-----------------------------------------------------------------------
 
       real ep
       real wk(nb)
+      real uuk(0:nb,ns),ttk(0:nb,ns)
 
       call nekgsync
       hpar_time=dnekclock()
@@ -484,8 +502,8 @@ c-----------------------------------------------------------------------
             call cfill(umax,-1.e9,nb)
             do j=1,ns
             do i=1,nb
-               if (uk(i,j).lt.umin(i)) umin(i)=uk(i,j)
-               if (uk(i,j).gt.umax(i)) umax(i)=uk(i,j)
+               if (uuk(i,j).lt.umin(i)) umin(i)=uuk(i,j)
+               if (uuk(i,j).gt.umax(i)) umax(i)=uuk(i,j)
             enddo
             enddo
             do j=1,nb                    ! compute hyper-parameter
@@ -504,7 +522,7 @@ c-----------------------------------------------------------------------
                write (6,*) i,udis(i),'udis'
             enddo
          endif
-         if (rmode.eq.'ALL'.or.rmode.eq.'OFF') then
+         if (rmode.eq.'ALL'.or.rmode.eq.'OFF'.or.rmode.eq.'AEQ') then
             call dump_serial(umin,nb,'ops/umin ',nid)
             call dump_serial(umax,nb,'ops/umax ',nid)
          endif
@@ -519,8 +537,8 @@ c-----------------------------------------------------------------------
             call cfill(tmax,-1.e9,nb)
             do j=1,ns
             do i=1,nb
-               if (tk(i,j).lt.tmin(i)) tmin(i)=tk(i,j)
-               if (tk(i,j).gt.tmax(i)) tmax(i)=tk(i,j)
+               if (ttk(i,j).lt.tmin(i)) tmin(i)=ttk(i,j)
+               if (ttk(i,j).gt.tmax(i)) tmax(i)=ttk(i,j)
             enddo
             enddo
             do j=1,nb                    ! compute hyper-parameter
@@ -539,7 +557,7 @@ c-----------------------------------------------------------------------
             enddo
          endif
 
-         if (rmode.eq.'ALL'.or.rmode.eq.'OFF') then
+         if (rmode.eq.'ALL'.or.rmode.eq.'OFF'.or.rmode.eq.'AEQ') then
             call dump_serial(tmin,nb,'ops/tmin ',nid)
             call dump_serial(tmax,nb,'ops/tmax ',nid)
          endif
@@ -665,23 +683,11 @@ C--------------------------------------------------------------------
 
          call copy(b,c,n*n)
 
-         call checkera('im1',a,n*n,ad_step)
-         call checkera('im2',b,n*n,ad_step)
-         call checkera('im3',c,n*n,ad_step)
-
          call lu(b,n,n,iwk1,iwk2)
 c        call dgetrf(n,n,b,n,iwk1,info)
 
-         call checkera('im4',a,n*n,ad_step)
-         call checkera('im5',b,n*n,ad_step)
-         call checkera('im6',c,n*n,ad_step)
-
          call solve(a,b,n,n,n,iwk1,iwk2)
 c        call dgetrs('N',n,n,b,n,iwk1,a,n,info)
-
-         call checkera('im7',a,n*n,ad_step)
-         call checkera('im8',b,n*n,ad_step)
-         call checkera('im9',c,n*n,ad_step)
       endif
 
       return
@@ -866,7 +872,7 @@ c-----------------------------------------------------------------------
       logical iftmp
 
       common /scrdump2/ ux1(lt),uy1(lt),uz1(lt),tt(lt),wk(lt)
-      common /testb/ ux2(lt),uy2(lt),uz2(lt)
+      common /testb/ ux2(lt),uy2(lt),uz2(lt),ux3(lt),uy3(lt),uz3(lt)
 
       iftmp=ifxyo
       ifxyo=.true.
@@ -879,6 +885,9 @@ c-----------------------------------------------------------------------
          call reconu_rms(ux2,uy2,uz2,u2a)
          if (ifrom(2)) call recont_rms(tt)
          call outpost(ux2,uy2,uz2,pr,tt,'rms')
+
+         call reconu_rm2(ux3,uy3,uz3,u2a)
+         call outpost(ux3,uy3,uz3,pr,tt,'rm2')
 
          call opcol2(ux1,uy1,uz1,ux1,uy1,uz1)
          call opsub2(ux2,uy2,uz2,ux1,uy1,uz1)
@@ -894,10 +903,10 @@ c-----------------------------------------------------------------------
          call opzero(ux1,uy1,uz1)
          do j=0,nb
          do i=0,nb
-            call admcol3(ux1,ub(1,i),tb(1,j),uuta(1+i+(nb+1)*j),n)
-            call admcol3(uy1,vb(1,i),tb(1,j),uuta(1+i+(nb+1)*j),n)
+            call admcol3(ux1,ub(1,i),tb(1,j,1),uuta(1+i+(nb+1)*j),n)
+            call admcol3(uy1,vb(1,i),tb(1,j,1),uuta(1+i+(nb+1)*j),n)
             if (ldim.eq.3)
-     $         call admcol3(uz1,wb(1,i),tb(1,j),uuta(1+i+(nb+1)*j),n)
+     $         call admcol3(uz1,wb(1,i),tb(1,j,1),uuta(1+i+(nb+1)*j),n)
          enddo
          enddo
          call outpost(ux1,uy1,uz1,pr,tt,'tmn')
@@ -1292,101 +1301,11 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      subroutine trace
-
-      include 'SIZE'
-      include 'TSTEP'
-      include 'INPUT'
-      include 'SOLN'
-      include 'MASS'
-      include 'MOR'
-
-      parameter (lt=lx1*ly1*lz1*lelt)
-
-      common /scrtr/ ux(lt),uy(lt),uz(lt)
-
-      character*127 fmat
-
-      if (istep.eq.0) then
-         call rom_init_params
-         call rom_init_fields
-         call loadbases
-      else
-         if (istep.gt.lcs) then
-            if (nio.eq.0) write (6,*) 'WARNING: lcs <= nsteps'
-         else
-            if (ifheat) then
-               n=lx1*ly1*lz1*nelt
-               call sub3(ux,t,tb,n)
-               call ps2b(tk(0,istep),ux,uy,uz,ub,vb,wb)
-            endif
-            if (ifflow) then
-               call opsub3(ux,uy,uz,vx,vy,vz,ub,vb,wb)
-               call pv2b(uk(0,istep),ux,uy,uz,ub,vb,wb)
-            endif
-         endif
-      endif
-
-      if (istep.eq.nsteps) then
-      if (nio.eq.0) then
-         call blank(fmat,127)
-         write (fmat,2) nb+1
-         if (ifflow) then
-            open (unit=10,file='ops/utrace')
-            do i=1,min(lcs,nsteps)
-               write (10,fmat) (uk(j,i),j=0,nb)
-            enddo
-            close (unit=10)
-
-            call reconv(ux,uy,uz,uk(0,istep))
-            call outpost(vx,vy,vz,pr,t,'err')
-            call outpost(ux,uy,uz,pr,t,'err')
-            call opsub2(ux,uy,uz,vx,vy,vz)
-            call outpost(ux,uy,uz,pr,t,'err')
-
-            err=sqrt(op_glsc2_wt(ux,uy,uz,ux,uy,uz,bm1))
-            ul2=sqrt(op_glsc2_wt(vx,vy,vz,vx,vy,vz,bm1))
-            if (nio.eq.0) write (6,*) err,ul2,err/ul2,'err'
-         endif
-         if (ifheat) then
-            open (unit=10,file='ops/ttrace')
-            do i=1,min(lcs,nsteps)
-               write (10,fmat) (tk(j,i),j=0,nb)
-            enddo
-            close (unit=10)
-         endif
-      endif
-      endif
-
-    2 format ('(1p',i4,'e25.17)')
-
-      return
-      end
-c-----------------------------------------------------------------------
-      subroutine set_trace
-
-      include 'SIZE'
-      include 'MOR'
-
-      if (nio.eq.0) write (6,*) 'inside set_trace'
-
-      open (unit=10,file='ops/utrace')
-
-      if (nio.eq.0) write (6,*) ad_nsteps,lcs,nb
-      do i=1,min(ad_nsteps,lcs)
-         read (10,*) (uk(j,i),j=0,nb)
-      enddo
-
-      close (unit=10)
-
-      return
-      end
-c-----------------------------------------------------------------------
       subroutine diag(h,wt,wk,n)
 
       real h(n,n),wt(n,n),wk(n)
 
-      call regularev(h,wk,n,wt)
+      call regularev(h,wk,n,wt,max(n*n,2))
 
       do j=1,n
       do i=1,n
@@ -1447,6 +1366,1841 @@ c-----------------------------------------------------------------------
 
       if (nio.eq.0) write (6,1) vmin,vmax,vmean,vprod,cstr,myind
     1 format('check ',1p4e13.5,1x,a,1x,i8)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine k_mean(k,nsu,nsp,nst,fn,seed)
+
+      ! K-means Clustering
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      integer seed
+      integer k           ! number of clusters
+      integer label(k) 
+      integer itermax
+
+      real centroid(k)    ! centroid parameter
+      real cent_fld(lt,k) ! centroid field
+      real sample(ls)
+      real dist(k)
+      real num_sc(k)
+      real rnk(ls,k)      ! binary indicator
+      real tmp(lt,k)      ! dummy variable
+      real tmpp(ls)       ! dummy variable
+      real obj_f          ! distortion measure 
+
+      character*128 fn
+      character*128 fnlint
+
+      n=lx1*ly1*lz1*nelt
+      itermax = 50
+
+      ! initialize centroid
+      ! currently put here for same initialization
+      call srand(seed)
+      do i=1,k
+         centroid(i) = rand()
+      enddo
+
+      ! scale up to parameter range
+      pmax = 180
+      pmin = 0
+      pdiff = pmax-pmin
+      do i=1,k
+         centroid(i) = pmin + pdiff*centroid(i)
+         write(6,*)i,centroid(i),nint(centroid(i))
+      enddo
+
+      ! read sample.list
+      ierr = 0
+      call lints(fnlint,fn,128)
+      if (nid.eq.0) open(77,file=fnlint,status='old',err=199)
+      ierr = iglmax(ierr,1)
+      if (ierr.gt.0) goto 199
+
+      nsave=max(max(nsu,nsp),nst)
+c     write(6,*)'nsave',nsave
+      icount = 0
+c     do ipass=1,nsave
+      do ipass=1,ls
+         call blank(initc,127)
+         initc(1) = 'done '
+         if (nid.eq.0) read(77,127,end=998)initc(1) 
+         read(initc,'(f10.0)') sample(ipass)
+c        write(6,*)sample(ipass)
+  998    call bcast(initc,127)
+  127    format(a127)
+      enddo
+      close(77)
+
+      do i=1,k
+         do j=1,ls
+            if (abs(centroid(i)-sample(j))<5) then  
+               centroid(i) = sample(j)
+                  write(6,*)i,centroid(i),sample(j)
+               label(i) = j
+            endif
+         enddo
+         call copy(cent_fld(1,i),ts0(1,label(i),1),n)
+      enddo
+
+      ! minimize distortion measure
+      do kk=1,itermax
+
+         ! assign each samlpe to cluster
+         call rzero(rnk,ls*k)
+         do i=1,ls
+            do j=1,k
+              call sub3(tmp(1,j),ts0(1,i,1),cent_fld(1,j),n)
+              dist(j) = glsc2(tmp(1,j),tmp(1,j),n)
+            enddo
+            write(6,*)ls,minloc(dist),sample(i)
+            do j=1,k
+               write(6,*)dist(j)
+               if (minloc(dist,1).eq.j) rnk(i,j) = 1
+            enddo
+         enddo
+
+         call c_distortion_measure(obj_f,cent_fld,rnk,k)
+         write(6,*)kk,obj_f,'distortion measure E'
+
+         call rone(tmpp,ls)
+         do i=1,k
+            num_sc(i) = glsc2(rnk(1,i),tmpp,ls)
+c           write(6,*)1./num_sc(i),num_sc(i),'num_sc'
+         enddo
+
+         ! compute new centroid
+c        do i=1,k
+c           write(6,*)glmax(cent_fld(1,i),n),'old max'
+c           call mxm(ts0,n,rnk(1,i),ls,cent_fld(1,i),1)
+c           call cmult(cent_fld(1,i),1./num_sc(i),n)
+c           centroid(i) = glsc2(sample,rnk(1,i),ls)/num_sc(i)
+c           write(6,*)i,centroid(i),'new centroid'
+c           write(6,*)glmax(cent_fld(1,i),n),'new max'
+c        enddo
+         do i=1,k
+            call rzero(cent_fld,n*k)
+            do j=1,ls
+               call add2s2(cent_fld(1,i),ts0(1,j,1),rnk(j,i),n)
+            enddo
+            call cmult(cent_fld(1,i),1./num_sc(i),n)
+            centroid(i) = glsc2(sample,rnk(1,i),ls)/num_sc(i)
+c           write(6,*)i,centroid(i),'new centroid'
+         enddo
+
+         ! assign the closest sample to be centroid
+         ! currently does not have enough sample
+         do i=1,k
+            do j=1,ls
+               if (abs(centroid(i)-sample(j))<5) then  
+                  centroid(i) = sample(j)
+c                 write(6,*)i,centroid(i),sample(j)
+                  label(i) = j
+               endif
+            enddo
+            call copy(cent_fld(1,i),ts0(1,label(i),1),n)
+         enddo
+         call c_distortion_measure(obj_f,cent_fld,rnk,k)
+         write(6,*)kk,obj_f,'distortion measure M'
+      enddo
+
+      ! write out clusters
+      do j=1,k
+         write(6,*) 'cluster: ',j,' centroid: ', centroid(j)
+         do i=1,ls
+            if (abs(rnk(i,j)-1).le.1e-8) then
+               write(6,*) sample(i) 
+            endif
+         enddo
+      enddo
+
+      write(6,*) obj_f,'distortion for cluster: ',k
+
+       
+      return
+
+  199 continue ! exception handle for file not found
+      ierr = 1
+      if (nid.eq.0) ierr = iglmax(ierr,1)
+      write (6,*) fnlint
+      call exitti('get_saved_fields did not find list file.$',ierr)
+
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine c_distortion_measure(obj_f,cent_fld,rnk,k)
+
+      ! Compute objective function (distortion measure)
+      ! J = \sum_{n=1}^N sum^K_{k=1} r_{nk} \|x_n - \nu_k\|^2
+      ! Sum of the squares of the distances of each data point to its
+      ! assigned vector \nu_k
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      integer k           ! number of clusters
+      real rnk(ls,k)      ! binary indicator
+      real cent_fld(lt,k) ! centroid
+      real obj_f          ! objective function value
+      real tmp(lt,k)
+      real dist(k)
+
+      n=lx1*ly1*lz1*nelt
+
+      ! assign each samlpe to cluster
+      obj_f=0
+      do i=1,ls
+         do j=1,k
+            if (abs(rnk(i,j)-1).le.1e-8) then
+               call sub3(tmp(1,j),ts0(1,i,1),cent_fld(1,j),n)
+               dist(j) = glsc2(tmp(1,j),tmp(1,j),n)
+               obj_f = obj_f + dist(j)
+            endif
+         enddo
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine projtoprerb(nocp,uuk,ttk)
+
+      ! This subroutine is for p-greedy. It project the RB basis
+      ! read in by loadbases onto space that is perpendicular to the
+      ! space spanned by bases in pbas.list
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      character*128 fn
+      character*128 fnlint
+
+      integer nocp
+
+      real uuk(0:nb,ns),ttk(0:nb,ns)
+
+      n=lx1*ly1*lz1*nelt
+
+      if (nio.eq.0) write (6,*) 'inside projtoprerb'
+
+      ! project onto the previous RB space
+      do j=1,ns
+      uuk(0,j) = 1.
+      do i=1,nocp
+         ww=vip(ub(1,i),vb(1,i),wb(1,i),ub(1,i),vb(1,i),wb(1,i))
+         vv=vip(ub(1,i),vb(1,i),wb(1,i),
+     $          us0(1,1,j),us0(1,2,j),us0(1,3,j))
+         uuk(i,j) = vv/ww
+      enddo
+      enddo
+
+      do j=1,ns
+      ttk(0,j) = 1.
+      do i=1,nocp
+         ww=sip(tb(1,i,1),tb(1,i,1))
+         vv=sip(tb(1,i,1),ts0(1,j,1))
+         ttk(i,j) = vv/ww
+      enddo
+      enddo
+
+      ! project onto the space perpendicular to
+      ! the previous RB space
+      do i=1,ns
+         call reconv_wo0(vx,vy,vz,uuk(0,i),nocp)
+         call recont_wo0(t,ttk(0,i),nocp)
+         if (ifrom(1)) then
+            call sub2(us0(1,1,i),vx,n)
+            call sub2(us0(1,2,i),vy,n)
+            if (ldim.eq.3) call sub2(us0(1,ldim,i),vz,n)
+         endif
+         if (ifrom(2)) call sub2(ts0(1,i,1),t,n)
+      enddo
+
+      if (nio.eq.0) write (6,*) 'exiting projtoprerb'
+      
+      return 
+      end
+c-----------------------------------------------------------------------
+      subroutine evaldut(ev,ut,vt,wt,u,v,w,t)
+
+      ! compute <div(u't')> where u := (u,v,w)
+
+      ! ev         := result
+      ! (ut,vt,wt) := components of mean temperature-velocity product
+      ! (u,v,w)    := mean velocity components
+      ! t          := mean temperature
+
+      include 'SIZE'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+      common /myblock4/ t1(lt),t2(lt),t3(lt)
+
+      real ev(lt),ut(lt),vt(lt),wt(lt),u(lt),v(lt),w(lt),t(lt)
+
+      n=lx1*ly1*lz1*nelt
+
+      call opcopy(t1,t2,t3,ut,vt,wt)
+
+      call admcol3(t1,u,t,-1.,n)
+      call admcol3(t2,v,t,-1.,n)
+      if (ldim.eq.3) call admcol3(t3,w,t,-1.,n)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine evalut(utp,vtp,wtp,ut,vt,wt,u,v,w,t)
+
+      ! compute <u't'> where u := (u,v,w)
+
+      ! (utp,vtp,wtp) := components of mean temperature-velocity fluctuation
+      ! (ut,vt,wt)    := components of mean temperature-velocity product
+      ! (u,v,w)       := mean velocity components
+      ! t             := mean temperature
+
+      include 'SIZE'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real utp(lt),vtp(lt),wtp(lt)
+      real ut(lt),vt(lt),wt(lt),u(lt),v(lt),w(lt),t(lt)
+
+      n=lx1*ly1*lz1*nelv
+
+      call opcopy(utp,vtp,wtp,ut,vt,wt)
+
+      call admcol3(utp,u,t,-1.,n)
+      call admcol3(vtp,v,t,-1.,n)
+      if (ldim.eq.3) call admcol3(wtp,w,t,-1.,n)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine reconv_wo0(ux,uy,uz,coef,ncop)
+
+      ! reconstruct velocity field without 0th mode
+
+      include 'SIZE'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real ux(lt),uy(lt),uz(lt),coef(0:nb)
+      integer ncop
+
+      n=lx1*ly1*lz1*nelv
+
+      call opzero(ux,uy,uz)
+
+      do i=1,ncop
+         call add2s2(ux,ub(1,i),coef(i),n)
+         call add2s2(uy,vb(1,i),coef(i),n)
+         call add2s2(uz,wb(1,i),coef(i),n)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine divm1(div,ux,uy,uz)
+
+      ! compute divergence of <ux,uy,uz> -- mesh 1 to mesh 1 (vec. to sca.)
+
+      include 'SIZE'
+      include 'DXYZ'
+      include 'GEOM'
+      include 'INPUT'
+      include 'TSTEP'
+
+      parameter (lxyz=lx1*ly1*lz1)
+      real ux(lxyz,1),uy(lxyz,1),uz(lxyz,1),div(lxyz,1)
+
+      common /ctmp1/ ur(lxyz),us(lxyz),ut(lxyz)
+
+      n = lx1-1
+      do ie=1,nelt
+         if (ldim.eq.3) then
+            call local_grad3(ur,us,ut,ux,n,ie,dxm1,dxtm1)
+            do i=1,lxyz
+               div(i,ie) =         jacmi(i,ie)*(ur(i)*rxm1(i,1,1,ie)
+     $                                        + us(i)*sxm1(i,1,1,ie)
+     $                                        + ut(i)*txm1(i,1,1,ie))
+            enddo
+            call local_grad3(ur,us,ut,uy,n,ie,dxm1,dxtm1)
+            do i=1,lxyz
+               div(i,ie)=div(i,ie)+jacmi(i,ie)*(ur(i)*rym1(i,1,1,ie)
+     $                                        + us(i)*sym1(i,1,1,ie)
+     $                                        + ut(i)*tym1(i,1,1,ie))
+            enddo
+            call local_grad3(ur,us,ut,uz,n,ie,dxm1,dxtm1)
+            do i=1,lxyz
+               div(i,ie)=div(i,ie)+jacmi(i,ie)*(ur(i)*rzm1(i,1,1,ie)
+     $                                        + us(i)*szm1(i,1,1,ie)
+     $                                        + ut(i)*tzm1(i,1,1,ie))
+            enddo
+         else
+            if (ifaxis) call setaxdy (ifrzer(ie))
+            call local_grad2(ur,us,ux,n,ie,dxm1,dytm1)
+            do i=1,lxyz
+               div(i,ie) =         jacmi(i,ie)*(ur(i)*rxm1(i,1,1,ie)
+     $                                        + us(i)*sxm1(i,1,1,ie))
+            enddo
+            call local_grad2(ur,us,uy,n,ie,dxm1,dytm1)
+            do i=1,lxyz
+               div(i,ie)=div(i,ie)+jacmi(i,ie)*(ur(i)*rym1(i,1,1,ie)
+     $                                        + us(i)*sym1(i,1,1,ie))
+            enddo
+         endif
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine recont_wo0(tt,coef,nocp)
+
+      ! reconstruct temperature field without 0th mode
+
+      include 'SIZE'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real tt(lt),coef(0:nb)
+      integer nocp
+
+      n=lx1*ly1*lz1*nelt
+
+      call rzero(tt,n)
+
+      do i=1,nocp
+         call add2s2(tt,tb(1,i,1),coef(i),n)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      function svint(s1,s2,s3)
+
+      ! compute unit normal integration of the input vector field
+
+      ! <s1,s2,s3> := input vector field
+
+      include 'SIZE'
+      include 'TOTAL'
+
+      real s1(lx1,ly1,lz1,lelt),
+     $                 s2(lx1,ly1,lz1,lelt),
+     $                 s3(lx1,ly1,lz1,lelt)
+
+      integer e,f,eg
+
+      lxyz  = lx1*ly1*lz1
+      nface = 2*ldim
+
+      iobj=1
+
+      a=0.
+      s=0.
+
+      do ie=1,nelt
+      do ifc=1,2*ldim
+         if (cbc(ifc,ie,1).ne.'E  '.and.cbc(ifc,ie,1).ne.'P  ') then
+            call facind(kx1,kx2,ky1,ky2,kz1,kz2,lx1,ly1,lz1,ifc)
+            l=1
+
+            do iz=kz1,kz2
+            do iy=ky1,ky2
+            do ix=kx1,kx2
+               a=a+area(l,1,ifc,ie)
+               s=s+area(l,1,ifc,ie)*(unx(l,1,ifc,ie)*s1(ix,iy,iz,ie)+
+     $                               uny(l,1,ifc,ie)*s2(ix,iy,iz,ie)+
+     $                               unz(l,1,ifc,ie)*s3(ix,iy,iz,ie))
+               l=l+1
+            enddo
+            enddo
+            enddo
+         endif
+      enddo
+      enddo
+
+      s=glsum(s,1)
+      a=glsum(a,1)
+
+      svint=s
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine checkaeq(ux,uy,uz,uxx,uxy,pp,visc)
+
+      ! checker for aeq formulation for velocity
+
+      ! <ux,uy,uz> := mean velocity field
+      ! uxx        := mean correlation (<ux ux>,<uy uy>,<uz uz>) field
+      ! uxy        := mean correlation (<ux uy>,<uy uz>,<uz ux>) field
+      ! pp         := mean pressure field
+      ! visc       := viscosity corresponding to input fields
+
+      include 'SIZE'
+      include 'SOLN'
+      include 'TSTEP'
+
+      real ux(lx1,ly1,lz1,lelt)
+      real uy(lx1,ly1,lz1,lelt)
+      real uz(lx1,ly1,lz1,lelt)
+
+      real uxx(lx1*ly1*lz1*lelt,ldim)
+      real uxy(lx1*ly1*lz1*lelt,ldim)
+
+      real pp(lx2,ly2,lz2,lelt)
+
+      common /myscr/         xm0(lx1,ly1,lz1,lelt)
+     $,                      ym0(lx1,ly1,lz1,lelt)
+     $,                      zm0(lx1,ly1,lz1,lelt)
+     $,                      pm1(lx1,ly1,lz1,lelv)
+     $,                      wx(lx1,ly1,lz1,lelv)
+     $,                      wy(lx1,ly1,lz1,lelv)
+     $,                      wz(lx1,ly1,lz1,lelv)
+      
+      n=lx1*ly1*lz1*nelv
+      time=1./visc
+
+      call divm1(wx,uxx(1,1),uxy(1,1),uxy(1,3))
+      call divm1(wy,uxy(1,1),uxx(1,2),uxy(1,2))
+      if (ldim.eq.3) call divm1(wz,uxy(1,3),uxy(1,2),uxx(1,3))
+
+      call chsign(wx,n)
+      call chsign(wy,n)
+      call chsign(wz,n)
+
+      call outpost(wx,wy,wz,pp,t,'cnv')
+
+      call mappr(pm1,pp,xm0,ym0)
+      call gradm1(xm0,ym0,zm0,pm1)
+
+      call outpost(xm0,ym0,zm0,pm1,t,'gdp')
+
+      call sub2(wx,xm0,n)
+      call sub2(wy,ym0,n)
+      if (ldim.eq.3) call sub2(wz,zm0,n)
+
+      if (ldim.eq.2) then
+         call lap2d(xm0,ux)
+         call add2s2(wx,xm0,visc,n)
+
+         call lap2d(ym0,uy)
+         call add2s2(wy,ym0,visc,n)
+      else
+         call lap3d(xm0,ux)
+         call add2s2(wx,xm0,visc,n)
+
+         call lap3d(ym0,uy)
+         call add2s2(wy,ym0,visc,n)
+
+         call lap3d(zm0,uz)
+         call add2s2(wz,zm0,visc,n)
+      endif
+
+      call outpost(xm0,ym0,zm0,pp,t,'lap')
+
+      call outpost(wx,wy,wz,pp,t,'aeq')
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine checkaeqp(ux,uy,uz,uxx,uxy,pp,visc)
+
+      ! checker for aeq formulation for velocity (with fluc. contribution)
+
+      ! <ux,uy,uz> := mean velocity field
+      ! uxx        := mean correlation (<ux'ux'>,<uy'uy'>,<uz'uz'>)
+      ! uxy        := mean correlation (<ux'uy'>,<uy'uz'>,<uz'ux'>)
+      ! pp         := mean pressure field
+      ! visc       := viscosity corresponding to input fields
+
+      include 'SIZE'
+      include 'SOLN'
+      include 'TSTEP'
+
+      real ux(lx1,ly1,lz1,lelt)
+      real uy(lx1,ly1,lz1,lelt)
+      real uz(lx1,ly1,lz1,lelt)
+
+      real uxx(lx1*ly1*lz1*lelt,ldim)
+      real uxy(lx1*ly1*lz1*lelt,ldim)
+
+      real pp(lx2,ly2,lz2,lelt)
+
+      common /myscr/         xm0(lx1,ly1,lz1,lelt)
+     $,                      ym0(lx1,ly1,lz1,lelt)
+     $,                      zm0(lx1,ly1,lz1,lelt)
+     $,                      pm1(lx1,ly1,lz1,lelv)
+     $,                      wx(lx1,ly1,lz1,lelv)
+     $,                      wy(lx1,ly1,lz1,lelv)
+     $,                      wz(lx1,ly1,lz1,lelv)
+      
+      n=lx1*ly1*lz1*nelv
+      time=1./visc
+
+      call divm1(wx,uxx(1,1),uxy(1,1),uxy(1,3))
+      call divm1(wy,uxy(1,1),uxx(1,2),uxy(1,2))
+      if (ldim.eq.3) call divm1(wz,uxy(1,3),uxy(1,2),uxx(1,3))
+
+      call chsign(wx,n)
+      call chsign(wy,n)
+      call chsign(wz,n)
+
+      call col3(xm0,ux,ux,n)
+      call col3(ym0,ux,uy,n)
+      call col3(zm0,ux,uz,n)
+      call divm1(pm1,xm0,ym0,zm0)
+      call sub2(wx,pm1,n)
+
+      call col3(xm0,uy,ux,n)
+      call col3(ym0,uy,uy,n)
+      call col3(zm0,uy,uz,n)
+      call divm1(pm1,xm0,ym0,zm0)
+      call sub2(wy,pm1,n)
+
+      if (ldim.eq.3) then
+         call col3(xm0,uz,ux,n)
+         call col3(ym0,uz,uy,n)
+         call col3(zm0,uz,uz,n)
+         call divm1(pm1,xm0,ym0,zm0)
+         call sub2(wz,pm1,n)
+      endif
+
+      call mappr(pm1,pp,xm0,ym0)
+      call gradm1(xm0,ym0,zm0,pm1)
+
+      call sub2(wx,xm0,n)
+      call sub2(wy,ym0,n)
+      if (ldim.eq.3) call sub2(wz,zm0,n)
+
+      if (ldim.eq.2) then
+         call lap2d(xm0,ux)
+         call add2s2(wx,xm0,visc,n)
+
+         call lap2d(ym0,uy)
+         call add2s2(wy,ym0,visc,n)
+      else
+         call lap3d(xm0,ux)
+         call add2s2(wx,xm0,visc,n)
+
+         call lap3d(ym0,uy)
+         call add2s2(wy,ym0,visc,n)
+
+         call lap3d(zm0,uz)
+         call add2s2(wz,zm0,visc,n)
+      endif
+
+      call outpost(wx,wy,wz,pp,t,'aq2')
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine checkaeqd(ux,uy,uz,uxx,uxy,pp,ud,visc)
+
+      ! checker for aeq formulation for velocity (with eddy model)
+
+      ! <ux,uy,uz> := mean velocity field
+      ! uxx        := mean correlation (<ux'ux'>,<uy'uy'>,<uz'uz'>)
+      ! uxy        := mean correlation (<ux'uy'>,<uy'uz'>,<uz'ux'>)
+      ! pp         := mean pressure field
+      ! visc       := viscosity corresponding to input fields
+
+      include 'SIZE'
+      include 'SOLN'
+      include 'TSTEP'
+
+      real ux(lx1*ly1*lz1*lelt)
+      real uy(lx1*ly1*lz1*lelt)
+      real uz(lx1*ly1*lz1*lelt)
+
+      real uxx(lx1*ly1*lz1*lelt,ldim)
+      real uxy(lx1*ly1*lz1*lelt,ldim)
+
+      real pp(lx2,ly2,lz2,lelt)
+
+      real ud(lx1*ly1*lz1*lelt,ldim)
+
+      common /myscr/         xm0(lx1,ly1,lz1,lelt)
+     $,                      ym0(lx1,ly1,lz1,lelt)
+     $,                      zm0(lx1,ly1,lz1,lelt)
+     $,                      pm1(lx1,ly1,lz1,lelv)
+     $,                      wx(lx1,ly1,lz1,lelv)
+     $,                      wy(lx1,ly1,lz1,lelv)
+     $,                      wz(lx1,ly1,lz1,lelv)
+      
+      n=lx1*ly1*lz1*nelv
+      time=1./visc
+
+      call divm1(wx,uxx(1,1),uxy(1,1),uxy(1,3))
+      call divm1(wy,uxy(1,1),uxx(1,2),uxy(1,2))
+      if (ldim.eq.3) call divm1(wz,uxy(1,3),uxy(1,2),uxx(1,3))
+
+      call chsign(wx,n)
+      call chsign(wy,n)
+      call chsign(wz,n)
+
+      call outpost(wx,wy,wz,pp,t,'cv1')
+
+      call gradm1(xm0,ym0,zm0,ux)
+      call opcolv(xm0,ym0,zm0,ud(1,1))
+      call divm1(wx,xm0,ym0,zm0)
+
+      call gradm1(xm0,ym0,zm0,uy)
+      call opcolv(xm0,ym0,zm0,ud(1,2))
+      call divm1(wy,xm0,ym0,zm0)
+
+      if (ldim.eq.3) then
+         call gradm1(xm0,ym0,zm0,uz)
+         call opcolv(xm0,ym0,zm0,ud(1,3))
+         call divm1(wz,xm0,ym0,zm0)
+      endif
+
+      call outpost(wx,wy,wz,pp,t,'cv2')
+
+      call col3(xm0,ux,ux,n)
+      call col3(ym0,ux,uy,n)
+      call col3(zm0,ux,uz,n)
+      call divm1(pm1,xm0,ym0,zm0)
+      call sub2(wx,pm1,n)
+
+      call col3(xm0,uy,ux,n)
+      call col3(ym0,uy,uy,n)
+      call col3(zm0,uy,uz,n)
+      call divm1(pm1,xm0,ym0,zm0)
+      call sub2(wy,pm1,n)
+
+      if (ldim.eq.3) then
+         call col3(xm0,uz,ux,n)
+         call col3(ym0,uz,uy,n)
+         call col3(zm0,uz,uz,n)
+         call divm1(pm1,xm0,ym0,zm0)
+         call sub2(wz,pm1,n)
+      endif
+
+      call mappr(pm1,pp,xm0,ym0)
+      call gradm1(xm0,ym0,zm0,pm1)
+
+      call sub2(wx,xm0,n)
+      call sub2(wy,ym0,n)
+      if (ldim.eq.3) call sub2(wz,zm0,n)
+
+      if (ldim.eq.2) then
+         call lap2d(xm0,ux)
+         call add2s2(wx,xm0,visc,n)
+
+         call lap2d(ym0,uy)
+         call add2s2(wy,ym0,visc,n)
+      else
+         call lap3d(xm0,ux)
+         call add2s2(wx,xm0,visc,n)
+
+         call lap3d(ym0,uy)
+         call add2s2(wy,ym0,visc,n)
+
+         call lap3d(zm0,uz)
+         call add2s2(wz,zm0,visc,n)
+      endif
+
+      call outpost(wx,wy,wz,pp,t,'aq2')
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine setdiff(udfld,tdfld,uafld,tafld,upup,upvp,uptp)
+
+      ! checker for aeq formulation for velocity (with eddy model)
+
+      ! <ux,uy,uz> := mean velocity field
+      ! uxx        := mean correlation (<ux'ux'>,<uy'uy'>,<uz'uz'>)
+      ! uxy        := mean correlation (<ux'uy'>,<uy'uz'>,<uz'ux'>)
+      ! pp         := mean pressure field
+      ! visc       := viscosity corresponding to input fields
+
+      include 'SIZE'
+      include 'SOLN'
+      include 'TSTEP'
+
+      real udfld(lx1*ly1*lz1*lelt,ldim)
+      real tdfld(lx1*ly1*lz1*lelt)
+      real uafld(lx1*ly1*lz1*lelt,ldim),tafld(lx1*ly1*lz1*lelt)
+      real upup(lx1*ly1*lz1*lelt,ldim),upvp(lx1*ly1*lz1*lelt,ldim)
+      real uptp(lx1*ly1*lz1*lelt,ldim)
+
+      common /myscr/         xm0(lx1,ly1,lz1,lelt)
+     $,                      ym0(lx1,ly1,lz1,lelt)
+     $,                      zm0(lx1,ly1,lz1,lelt)
+     $,                      pm1(lx1,ly1,lz1,lelv)
+     $,                      tx(lx1*ly1*lz1*lelv)
+     $,                      ty(lx1*ly1*lz1*lelv)
+     $,                      tz(lx1*ly1*lz1*lelv)
+
+      ! evaluate eddy viscosity
+
+      call gradm1(tx,ty,tz,uafld(1,1))
+      call projvecm(upup(1,1),upvp(1,1),upvp(1,3),tx,ty,tz,udfld(1,1))
+
+      call gradm1(tx,ty,tz,uafld(1,2))
+      call projvecm(upvp(1,1),upup(1,2),upvp(1,2),tx,ty,tz,udfld(1,2))
+
+      if (ldim.eq.3) then
+         call gradm1(tx,ty,tz,uafld(1,3))
+         call projvecm(upvp(1,3),upvp(1,2),upup(1,3),
+     $      tx,ty,tz,udfld(1,3))
+      endif
+
+      ! evaluate eddy diffusivity
+
+      call gradm1(tx,ty,tz,tafld)
+      call projvecm(uptp(1,1),uptp(1,2),uptp(1,ldim),tx,ty,tz,tdfld)
+
+      call gradm1(tx,ty,tz,uafld(1,1))
+      call opcolv(tx,ty,tz,udfld(1,1))
+      call divm1(xm0,tx,ty,tz)
+
+      call gradm1(tx,ty,tz,uafld(1,2))
+      call opcolv(tx,ty,tz,udfld(1,2))
+      call divm1(ym0,tx,ty,tz)
+
+      call gradm1(tx,ty,tz,uafld(1,3))
+      call opcolv(tx,ty,tz,udfld(1,3))
+      call divm1(zm0,tx,ty,tz)
+
+      call gradm1(tx,ty,tz,tafld)
+      call opcolv(tx,ty,tz,tdfld)
+      call divm1(pm1,tx,ty,tz)
+
+      call outpost(xm0,ym0,zm0,pr,pm1,'dif')
+
+      call divm1(xm0,upup(1,1),upvp(1,1),upvp(1,3))
+      call divm1(ym0,upvp(1,1),upup(1,2),upvp(1,2))
+      call divm1(zm0,upvp(1,3),upvp(1,2),upup(1,3))
+      call divm1(pm1,uptp(1,1),uptp(1,2),uptp(1,3))
+
+      call outpost(xm0,ym0,zm0,pr,pm1,'dif')
+
+      call outpost(upup(1,1),upvp(1,1),upvp(1,3),pr,pm1,'uvw')
+      call outpost(upvp(1,1),upup(1,2),upvp(1,2),pr,pm1,'uvw')
+      call outpost(upvp(1,3),upvp(1,2),upup(1,3),pr,pm1,'uvw')
+      call outpost(uptp(1,1),uptp(1,2),uptp(1,3),pr,pm1,'uvw')
+
+c     call outpost(udfld(1,1),udfld(1,2),udfld(1,ldim),
+c    $     pr,tdfld,'dif')
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine projvecm(ax,ay,az,bx,by,bz,pfld)
+
+      ! find the negative of the projection scale
+
+      ! <ax,ay,az> := vector to be projected
+      ! <bx,by,bz> := vector to project onto
+      ! pfld       := -a.b/b.b
+
+      include 'SIZE'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real ax(lt),ay(lt),az(lt),bx(lt),by(lt),bz(lt)
+      real pfld(lx1*ly1*lz1*lelt)
+      
+      n=lx1*ly1*lz1*nelt
+
+      eps=1.e-16
+
+      do i=1,n
+         bnorm2=bx(i)**2+by(i)**2+eps
+         if (ldim.eq.3) bnorm2=bnorm2+bz(i)**2
+
+         dot=ax(i)*bx(i)+ay(i)*by(i)+eps
+         if (ldim.eq.3) dot=dot+az(i)*bz(i)
+
+         pfld(i)=-dot/bnorm2
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine setpsi(psit,veca,vecb)
+
+      ! find the transformation tensor such that psi a = b
+
+      ! <ax,ay,az> := starting vector
+      ! <bx,by,bz> := ending vector
+      ! psi        := transformation tensor (ldim x ldim)
+
+      include 'SIZE'
+
+      common /psitmp/ w1(ldim)
+
+      real veca(lx1*ly1*lz1*lelt,ldim),vecb(lx1*ly1*lz1*lelt,ldim)
+      real psit(lx1*ly1*lz1*lelt,ldim*ldim)
+      
+      n=lx1*ly1*lz1*nelt
+
+      eps=1.e-16
+      s1=0.
+      s2=0.
+
+      do i=1,n
+         anorm2=veca(i,1)**2+veca(i,2)**2+eps
+         if (ldim.eq.3) anorm2=anorm2+veca(i,3)**2
+
+         bnorm2=vecb(i,1)**2+vecb(i,2)**2+eps
+         if (ldim.eq.3) bnorm2=bnorm2+vecb(i,3)**2
+
+         dot=veca(i,1)*vecb(i,1)+veca(i,2)*vecb(i,2)
+         if (ldim.eq.3) dot=dot+veca(i,3)*vecb(i,3)
+
+         theta=acos(dot/sqrt(bnorm2*anorm2))
+         ct=cos(theta)
+         st=sin(theta)
+
+         if (ldim.eq.2) then
+            psit(i,1)=ct
+            psit(i,2)=st
+            psit(i,3)=ct
+            psit(i,4)=-st
+         else
+            rx=veca(i,2)*vecb(i,3)-veca(i,3)*vecb(i,2)
+            ry=veca(i,3)*vecb(i,1)-veca(i,1)*vecb(i,3)
+            rz=veca(i,1)*vecb(i,2)-veca(i,2)*vecb(i,1)
+
+            psit(i,1)=ct+rx*rx*(1-ct)
+            psit(i,2)=ry*rx*(1-ct)+rz*st
+            psit(i,3)=rz*rx*(1-ct)-ry*st
+            psit(i,4)=rx*ry*(1-ct)-rz*st
+            psit(i,5)=ct+ry*ry*(1-ct)
+            psit(i,6)=rz*ry*(1-ct)+rx*st
+            psit(i,7)=rx*rz*(1-ct)+ry*st
+            psit(i,8)=ry*rz*(1-ct)-rx*st
+            psit(i,9)=ct+rz*rz*(1-ct)
+         endif
+
+         call mxm(psit,ldim,veca(i,1),ldim,w1,1)
+         call sub2(w1,vecb)
+
+         s2=s2+bnorm2
+         s1=s1+vlsc2(w1,w1,ldim)
+      enddo
+
+      s1=sqrt(glsum(s1,1))
+      s2=sqrt(glsum(s2,1))
+
+      if (nid.eq.0) write (6,*) s1,s2,s1/s2,'psierror'
+
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine splitvec(x,y,z,xyz,ndim,n)
+
+      ! split vector list into component lists
+
+      ! <x,y,z> := vector component lists
+      ! xyz     := vector lies
+
+      real x(n),y(n),z(n),xyz(ndim,n)
+
+      do i=1,n
+         x(i) = xyz(1,i)
+         y(i) = xyz(2,i)
+         if (ndim.eq.3) z(i) = xyz(3,i)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine combvec(xyz,x,y,z,ndim,n)
+
+      ! combine vector component lists into vector list
+
+      ! xyz     := vector lies
+      ! <x,y,z> := vector component lists
+
+      real xyz(ndim,n),x(n),y(n),z(n)
+
+      do i=1,n
+         xyz(1,i) = x(i)
+         xyz(2,i) = y(i)
+         if (ndim.eq.3) xyz(3,i) = z(i)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine tfunc(u,rad,wt,n)
+
+      ! apply transfer function defined by rad and wt to a vector
+
+      ! u   := input/output coefficient set
+      ! rad := radius of the damping (percentage of trailing modes)
+      ! wt  := weight of the damping (percent attenuation for mode n)
+      ! n   := length of coefficient set
+
+      real u(n)
+
+      m=n*rad
+
+      do i=0,m-1
+         u(n-i)=u(n-i)*(1.0-wt*(m*1.0-i)/(m*1.0))
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine evalf(f,uu,tt,g,mdim,ifweak)
+
+      ! evaluate f, the time-derivative based on the current solution
+
+      ! f      := time-derivative of the solution tt
+      ! uu     := advection field
+      ! tt     := solution field
+      ! g      := forcing field
+      ! gnn    := inhomogeneous Neumann value field
+      ! mdim   := dimension of tt
+      ! ifweak := flag to evaluate the terms in a weak sense
+
+      include 'SIZE'  ! dep: SOLN,MOR,INPUT,lt,ltd,ldim
+
+      include 'TSTEP' ! dep: ifield
+      include 'MASS'  ! dep: bintm1
+      include 'SOLN'  ! dep: prlag
+
+      parameter (lt=lx1*ly1*lz1*lelt,ltd=lxd*lyd*lzd*lelt)
+
+      common /scrns/ wk(lt,ldim)
+      common /convect/ c1v(ltd),c2v(ltd),c3v(ltd),
+     $                 u1v(ltd),u2v(ltd),u3v(ltd)
+
+      real f(lt,mdim),uu(lt,ldim),tt(lt,mdim),g(lt,mdim)
+      logical ifweak
+
+      nv=lx1*ly1*lz1*nelv
+      nt=lx1*ly1*lz1*nelt
+
+      jfield=ifield
+
+      ifield=1
+      n=nv
+
+      if (mdim.ne.ldim) ifield=2
+      if (mdim.ne.ldim) n=nt
+
+      call rzero(f,nt)
+
+      call evalcflds(f,uu,tt,mdim,1,ifweak)
+      call evalaflds(wk,tt,mdim,1,ifweak)
+
+      do idim=1,mdim
+         call chsign(f(1,idim),n)
+         call add2(f(1,idim),wk(1,idim),n)
+         call add2(f(1,idim),g(1,idim),n)
+      enddo
+
+      if (ifweak) then
+         if (ifield.eq.1) then
+            call opbinv1(f(1,1),f(1,2),f(1,ldim),
+     $         f(1,1),f(1,2),f(1,ldim),1.)
+         else
+            call col2(f,tmask,n)
+            call dssum(f,lx1,ly1,lz1)
+            call col2(f,bintm1,n)
+         endif
+      else
+         do idim=1,mdim
+            call dsavg(f(1,idim))
+         enddo
+      endif
+
+      if (ifield.eq.1) call incomprn(f(1,1),f(1,2),f(1,ldim),prlag)
+
+      ifield=jfield
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine evalcflds(cfld,us0,ts0,mdim,ns,ifweak)
+
+      ! evaluate convection field
+
+      ! cfld   := result of convection application
+      ! us0    := velocity fields
+      ! ts0    := scalar/vector advectee fields
+      ! mdim   := dimension of ts0 at each point
+      ! ns     := number of convection fields to evaluate
+      ! ifweak := weak form of the convection term
+
+      include 'SIZE'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+      common /scrkk3/ wk(lt,3)
+
+      real us0(lt,ldim,ns),ts0(lt,mdim,ns)
+      real cfld(lt,mdim,ns)
+
+      logical ifweak
+
+      nv=lx1*ly1*lz1*nelv
+
+      if (ifweak) then
+         do is=1,ns
+            call setcnv_c(us0(1,1,is),us0(1,2,is),us0(1,ldim,is))
+
+            if (mdim.eq.ldim) then
+               call setcnv_u(ts0(1,1,is),ts0(1,2,is),ts0(1,ldim,is))
+            else
+               call setcnv_u1(ts0(1,1,is))
+            endif
+
+            call cc(cfld(1,1,is),mdim)
+         enddo
+      else
+         do is=1,ns
+            do idim=1,mdim
+               call gradm1(wk(1,1),wk(1,2),wk(1,3),ts0(1,idim,is))
+               call col3(cfld(1,idim,is),us0(1,1,is),wk(1,1),nv)
+               call add2col2(cfld(1,idim,is),us0(1,2,is),wk(1,2),nv)
+               if (ldim.eq.3)
+     $            call add2col2(cfld(1,idim,is),us0(1,3,is),wk(1,3),nv)
+            enddo
+         enddo
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine evalaflds(afld,ts0,mdim,ns,ifweak)
+
+      ! evaluate diffusion field
+
+      ! afld   := result of Laplacian application
+      ! ts0    := scalar/vector fields
+      ! mdim   := dimension of ts0 at each point
+      ! ns     := number of diffusion fields to evaluate
+      ! ifweak := weak form of the diffusion term
+
+      include 'SIZE'  ! dep: lt, etc.
+      include 'LMOR'  ! dep: lelm
+      include 'GEOM'  ! dep: area
+      include 'INPUT' ! dep: cbc
+      include 'SOLN'  ! dep: vdiff
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      common /scrkk3/ wk(lt,2),wk3(lx1,ly1,lz1,lelt)
+      common /morid/ ones(lx1*ly1*lz1*lelm),zeros(lx1*ly1*lz1*lelm)
+      common /morbc/ gn(lx1,ly1,lz1,lelt)
+
+      real ts0(lt,mdim,ns),afld(lt,mdim,ns)
+
+      logical ifweak
+
+      nv=lx1*ly1*lz1*nelv
+      nt=lx1*ly1*lz1*nelt
+
+      jfield=ifield
+      ifield=1
+      n=nv
+
+      if (mdim.ne.ldim) ifield=2
+      if (mdim.ne.ldim) n=nt
+
+      if (ifweak) then
+         do is=1,ns
+         do idim=1,mdim
+            call axhelm(afld(1,idim,is),ts0(1,idim,is),
+     $         vdiff(1,1,1,1,ifield),zeros,ifield,1)
+            call chsign(afld(1,idim,is),n)
+         enddo
+         enddo
+
+         if (ifield.eq.2) then
+            call rzero(wk3,n)
+            do ie=1,nelt
+            do ifc=1,2*ldim
+               if (cbc(ifc,ie,2).eq.'f  ') then
+                  call facind(
+     $               kx1,kx2,ky1,ky2,kz1,kz2,lx1,ly1,lz1,ifc)
+                  l=1
+                  do iz=kz1,kz2
+                  do iy=ky1,ky2
+                  do ix=kx1,kx2
+                     wk3(ix,iy,iz,ie)=wk3(ix,iy,iz,ie)
+     $                  +gn(ix,iy,iz,ie)*area(l,1,ifc,ie)
+                     l=l+1
+                  enddo
+                  enddo
+                  enddo
+               endif
+            enddo
+            enddo
+
+            do is=1,ns
+               call add2(afld(1,1,is),wk3,n)
+            enddo
+         endif
+      else
+         do is=1,ns
+         do idim=1,mdim
+            call gradm1(wk(1,1),wk(1,2),wk(1,3),ts0(1,idim,is))
+            call col2(wk(1,1),vdiff(1,1,1,1,ifield),n)
+            call col2(wk(1,2),vdiff(1,1,1,1,ifield),n)
+            if (ldim.eq.3) call col2(
+     $         wk(1,3),vdiff(1,1,1,1,ifield),n)
+
+            call divm1(afld(1,idim,is),wk(1,1),wk(1,2),wk(1,3))
+         enddo
+         enddo
+      endif
+
+      ifield=jfield
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set0flow(uvwb,nb,idirf)
+
+      ! set the flow rate of velocity fields to be 0 in the idirf direction
+
+      ! uvwb  := velocity fields
+      ! nb    := total number of velocity fields
+      ! idirf := direction of flow (must be consistent with param(54))
+
+      include 'SIZE'
+      include 'MASS'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real uvwb(lt,ldim,nb)
+
+      parameter (kx1=lx1,ky1=ly1,kz1=lz1,kx2=lx2,ky2=ly2,kz2=lz2)
+
+      common /cvflow_a/ vxc(kx1,ky1,kz1,lelv)
+     $                , vyc(kx1,ky1,kz1,lelv)
+     $                , vzc(kx1,ky1,kz1,lelv)
+     $                , prc(kx2,ky2,kz2,lelv)
+     $                , vdc(kx1*ky1*kz1*lelv,2)
+
+      common /cvflow_r/ flow_rate,base_flow,domain_length,xsec
+     $                , scale_vf(3)
+
+      nv=lx1*ly1*lz1*nelv
+
+      do ib=1,nb
+         current_flow=glsc2(uvwb(1,idirf,ib),bm1,nv)/domain_length
+         delta_flow = 0.-current_flow
+         scale = delta_flow/base_flow
+
+         call add2s2(uvwb(1,1,ib),vxc,scale,nv)
+         call add2s2(uvwb(1,2,ib),vyc,scale,nv)
+         if (ldim.eq.3) call add2s2(uvwb(1,3,ib),vzc,scale,nv)
+         if (nio.eq.0) write (6,1) ib,idirf,current_flow,base_flow
+      enddo
+
+    1 format (i8,i8,1p2e13.4,' set0flow')
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine p2b(uvw,uvwb,mdim,nb,iforth,sc)
+
+      include 'SIZE'
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real uvw(lt,mdim),uvwb(lt,mdim,nb),sc(nb)
+      logical iforth
+
+      nv=lx1*ly1*lz1*nelv
+      nt=lx1*ly1*lz1*nelt
+
+      n=nt
+      if (mdim.eq.ldim) n=nv
+
+      call p2b_helper(sc,uvw,uvwb,mdim,nb)
+
+      if (.not.iforth) then
+         do i=1,mdim
+            call rzero(uvw(1,i),n)
+         enddo
+      endif
+
+      do ib=1,nb
+         if (iforth) then
+            const=-sc(ib)
+         else
+            const=sc(ib)
+         endif
+         do idim=1,mdim
+            call add2s2(uvw(1,idim),uvwb(1,idim,ib),const,n)
+         enddo
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine p2b_helper(sc,uvw,uvwb,mdim,nb)
+
+      include 'SIZE'
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real uvw(lt,mdim),uvwb(lt,mdim,nb),sc(nb)
+
+      do i=1,nb
+         sc(i)=fip(uvw(1,1),uvwb(1,1,i),mdim)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      function fip(uvw,xyz,mdim)
+
+      include 'SIZE'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+      real uvw(lt,mdim),xyz(lt,mdim)
+
+      if (mdim.eq.ldim) then
+         fip=vip(uvw(1,1),uvw(1,2),uvw(1,ldim),
+     $            xyz(1,1),xyz(1,2),xyz(1,ldim))
+      else
+         fip=sip(uvw,xyz)
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine find_cerr
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+      common /scrns/ ux(lt),uy(lt),uz(lt),dx(lt),dy(lt),dz(lt)
+      common /scruz/ sx(lt),sy(lt),sz(lt),uwx(lt),uwy(lt),uwz(lt),
+     $               tx(lt),ty(lt),tz(lt)
+
+      real cex(nb),crom(nb)
+
+      call rzero(cex,nb)
+      call rzero(crom,nb)
+
+      if (nio.eq.0) write (6,*) 'starting find_cerr ...'
+
+      nv=lx1*ly1*lz1*nelv
+
+      mint=25
+
+      nnb=(nb/2)/mint
+
+      do is=1,ns
+         if (nio.eq.0) write (6,*) 'find_cerr loop ',is
+         ! create tilde u
+         call copy(ux,us0(1,1,is),nv)
+         call add2(ux,ub,nv)
+
+         call copy(uy,us0(1,2,is),nv)
+         call add2(uy,vb,nv)
+c        if (nio.eq.0) write (6,*) 'wp 2',is
+
+         if (ldim.eq.3) then
+            call copy(uz,us0(1,3,is),nv)
+            call add2(uz,wb,nv)
+         endif
+
+         do iib=1,mint
+c           if (nio.eq.0) write (6,*) 'wp 3',iib,mint
+            call opzero(dx,dy,dz)
+
+            ! create u
+            call opcopy(dx,dy,dz,ub,vb,wb)
+            do ib=1,iib*nnb
+               cf=op_glsc2_wt(us0(1,1,is),us0(1,2,is),us0(1,ldim,is),
+     $                    uvwb(1,1,ib),uvwb(1,2,ib),uvwb(1,ldim,ib),bm1)
+
+               call add2s2(dx,uvwb(1,1,ib),cf,nv)
+               call add2s2(dy,uvwb(1,2,ib),cf,nv)
+               if (ldim.eq.3) call add2s2(dz,uvwb(1,3,ib),cf,nv)
+            enddo
+c           if (nio.eq.0) write (6,*) 'wp 4',iib,mint
+
+            ! create u'
+            call opsub3(sx,sy,sz,ux,uy,uz,dx,dy,dz)
+c           if (nio.eq.0) write (6,*) 'wp 4.1',iib,mint
+
+            call convect_new(uwx,dx,.false.,ux,uy,uz,.false.)
+            call convect_new(uwy,dy,.false.,ux,uy,uz,.false.)
+            if (ldim.eq.3)
+     $         call convect_new(uwz,dz,.false.,ux,uy,uz,.false.)
+c           if (nio.eq.0) write (6,*) 'wp 4.2',iib,mint
+
+            ctmp1=glsc2(sx,uwx,nv)+glsc2(sy,uwy,nv)
+c           if (nio.eq.0) write (6,*) 'wp 4.3',iib,mint
+            if (ldim.eq.3) ctmp1=ctmp1+glsc2(sz,uwz,nv)
+c           if (nio.eq.0) write (6,*) 'wp 4.4',iib,mint
+            cex(iib)=cex(iib)+ctmp1*ctmp1
+c           if (nio.eq.0) write (6,*) 'wp 5',iib,mint
+
+            ! project u' onto basis
+
+            call opzero(tx,ty,tz)
+            ctmp2=0.
+            do ib=nnb*iib+1,nnb*iib*2
+               cf=op_glsc2_wt(sx,sy,sz,ub(1,ib),vb(1,ib),wb(1,ib),bm1)
+               call add2s2(tx,ub(1,ib),cf,nv)
+               call add2s2(ty,vb(1,ib),cf,nv)
+               if (ldim.eq.3) call add2s2(tz,wb(1,ib),cf,nv)
+
+               ctmp2=glsc2(tx,uwx,nv)+glsc2(ty,uwy,nv)
+               if (ldim.eq.3) ctmp2=ctmp2+glsc2(sz,uwz,nv)
+
+c              if (nio.eq.0) write (6,*) 'ctmp ',is,iib,ib,ctmp1,ctmp2
+
+            enddo
+            crom(iib)=crom(iib)+(ctmp1-ctmp2)*(ctmp1-ctmp2)
+         enddo
+      enddo
+
+      if (nio.eq.0) then
+         open (unit=10,file='c.dat')
+
+         do i=1,mint
+            write (10,*) cex(i),crom(i),sqrt(crom(i)/cex(i))
+         enddo
+
+         close (unit=10)
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine find_cerr2
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+      common /scrns/ ux(lt),uy(lt),uz(lt),dx(lt),dy(lt),dz(lt)
+      common /scruz/ sx(lt),sy(lt),sz(lt),uwx(lt),uwy(lt),uwz(lt),
+     $               tx(lt),ty(lt),tz(lt),
+     $               ex(lt),ey(lt),ez(lt)
+
+      real cex(nb),crom(nb)
+
+      call rzero(cex,nb)
+      call rzero(crom,nb)
+
+      if (nio.eq.0) write (6,*) 'starting find_cerr ...'
+
+      nv=lx1*ly1*lz1*nelv
+
+      mint=25
+
+      nnb=((nb-1)/2)/mint
+
+      ! orthogonalize AB                 
+      do ib=nnb*mint+2,2*nnb*mint+1
+         call opcopy(ex,ey,ez,ub(1,ib),vb(1,ib),wb(1,ib))
+         do jb=nnb*mint+1,ib-1
+            cf=-op_glsc2_wt(ub(1,jb),vb(1,jb),wb(1,jb),
+     $         ex,ey,ez,bm1)
+            call add2s2(ex,ub(1,jb),cf,nv)
+            call add2s2(ey,vb(1,jb),cf,nv)
+            if (ldim.eq.3) call add2s2(ez,wb(1,jb),cf,nv)
+         enddo
+
+         cf=1./sqrt(op_glsc2_wt(ex,ey,ez,
+     $       ex,ey,ez,bm1))
+         call opcmult(ex,ey,ez,cf)
+         call opcopy(ub(1,ib),vb(1,ib),wb(1,ib),ex,ey,ez,cf)
+      enddo
+
+      do is=1,ns
+         if (nio.eq.0) write (6,*) 'find_cerr loop ',is
+         ! create tilde u
+         call copy(ux,us0(1,1,is),nv)
+         call add2(ux,ub,nv)
+
+         call copy(uy,us0(1,2,is),nv)
+         call add2(uy,vb,nv)
+c        if (nio.eq.0) write (6,*) 'wp 2',is
+
+         if (ldim.eq.3) then
+            call copy(uz,us0(1,3,is),nv)
+            call add2(uz,wb,nv)
+         endif
+
+         do iib=1,mint
+c           if (nio.eq.0) write (6,*) 'wp 3',iib,mint
+            call opzero(dx,dy,dz)
+
+            ! create u
+            call opcopy(dx,dy,dz,ub,vb,wb)
+            do ib=1,iib*nnb
+               cf=op_glsc2_wt(us0(1,1,is),us0(1,2,is),us0(1,ldim,is),
+     $                    uvwb(1,1,ib),uvwb(1,2,ib),uvwb(1,ldim,ib),bm1)
+
+               call add2s2(dx,uvwb(1,1,ib),cf,nv)
+               call add2s2(dy,uvwb(1,2,ib),cf,nv)
+               if (ldim.eq.3) call add2s2(dz,uvwb(1,3,ib),cf,nv)
+            enddo
+c           if (nio.eq.0) write (6,*) 'wp 4',iib,mint
+
+            ! create u'
+            call opsub3(sx,sy,sz,ux,uy,uz,dx,dy,dz)
+c           if (nio.eq.0) write (6,*) 'wp 4.1',iib,mint
+
+            call convect_new(uwx,dx,.false.,ux,uy,uz,.false.)
+            call convect_new(uwy,dy,.false.,ux,uy,uz,.false.)
+            if (ldim.eq.3)
+     $         call convect_new(uwz,dz,.false.,ux,uy,uz,.false.)
+c           if (nio.eq.0) write (6,*) 'wp 4.2',iib,mint
+
+            ctmp1=glsc2(sx,uwx,nv)+glsc2(sy,uwy,nv)
+c           if (nio.eq.0) write (6,*) 'wp 4.3',iib,mint
+            if (ldim.eq.3) ctmp1=ctmp1+glsc2(sz,uwz,nv)
+c           if (nio.eq.0) write (6,*) 'wp 4.4',iib,mint
+            cex(iib)=cex(iib)+ctmp1*ctmp1
+c           if (nio.eq.0) write (6,*) 'wp 5',iib,mint
+
+            ! project u' onto basis
+
+            call opzero(tx,ty,tz)
+            ctmp2=0.
+            do ib=nnb*iib+1,nnb*iib*2+1
+               ! orthogonalize basis
+               call opcopy(ex,ey,ez,ub(1,ib),vb(1,ib),wb(1,ib))
+               do jb=1,nnb*iib
+                  cf=-op_glsc2_wt(ub(1,jb),vb(1,jb),wb(1,jb),
+     $               ex,ey,ez,bm1)
+                  call add2s2(ex,ub(1,jb),cf,nv)
+                  call add2s2(ey,vb(1,jb),cf,nv)
+                  if (ldim.eq.3) call add2s2(ez,wb(1,jb),cf,nv)
+               enddo
+               cf=1./sqrt(op_glsc2_wt(ex,ey,ez,
+     $                ex,ey,ez,bm1))
+               call opcmult(ex,ey,ez,cf)
+
+               ! find component
+               cf=op_glsc2_wt(sx,sy,sz,ex,ey,ez,bm1)
+               call add2s2(tx,ex,cf,nv)
+               call add2s2(ty,ey,cf,nv)
+               if (ldim.eq.3) call add2s2(tz,ez,cf,nv)
+
+               ctmp2=glsc2(tx,uwx,nv)+glsc2(ty,uwy,nv)
+               if (ldim.eq.3) ctmp2=ctmp2+glsc2(sz,uwz,nv)
+
+c              if (nio.eq.0) write (6,*) 'ctmp ',is,iib,ib,ctmp1,ctmp2
+
+            enddo
+            crom(iib)=crom(iib)+(ctmp1-ctmp2)*(ctmp1-ctmp2)
+         enddo
+      enddo
+
+      if (nio.eq.0) then
+         open (unit=10,file='c.dat')
+
+         do i=1,mint
+            write (10,*) cex(i),crom(i),sqrt(crom(i)/cex(i))
+         enddo
+
+         close (unit=10)
+      endif
+
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine genrij()
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'AVG'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      common /myblocka/ wk(lt,ldim,ldim)
+
+      character*127 fname 
+
+      call blank(fname,127)
+      fname='avg.list'
+      fname='rms.list'
+      fname='rm2.list'
+
+      nv=lx1*ly1*lz1*nelv
+
+      call col3(wk(1,1,1),uavg,uavg,nv)
+      call col3(wk(1,1,2),vavg,uavg,nv)
+      call col3(wk(1,2,2),vavg,vavg,nv)
+
+      if (ldim.eq.3) then
+         call col3(wk(1,1,3),uavg,wavg,nv)
+         call col3(wk(1,2,3),vavg,wavg,nv)
+         call col3(wk(1,3,3),wavg,wavg,nv)
+      endif
+
+      call sub2(wk(1,1,1),urms,nv)
+      call sub2(wk(1,1,2),uvms,nv)
+      call sub2(wk(1,2,2),vrms,nv)
+
+      if (ldim.eq.3) then
+         call sub2(wk(1,1,3),wums,nv)
+         call sub2(wk(1,2,3),vwms,nv)
+         call sub2(wk(1,3,3),wrms,nv)
+      endif
+
+      call divm1(wk(1,2,1),wk(1,1,1),wk(1,1,2),wk(1,1,3))
+      call divm1(wk(1,2,1),wk(1,1,1),wk(1,1,2),wk(1,1,3))
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine orthonormb(b,mdim,nb)
+
+      ! orthonormalize fields with modified Gram-Schmidt
+
+      include 'SIZE'
+      include 'TOTAL'
+
+      real b(lx1*ly1*lz1*lelt,mdim,nb)
+
+      nv=lx1*ly1*lz1*nelv
+      nt=lx1*ly1*lz1*nelt
+
+      do i=1,nb
+         do j=1,i-1
+            if (mdim.eq.ldim) then
+               sc=-vip(b(1,1,i),b(1,2,i),b(1,ldim,i),
+     $                 b(1,1,j),b(1,2,j),b(1,ldim,j))
+
+               call opadds(b(1,1,i),b(1,2,i),b(1,ldim,i),
+     $                      b(1,1,j),b(1,2,j),b(1,ldim,j),sc,nv,2)
+            else if (mdim.eq.1) then
+               sc=-sip(b(1,1,i),b(1,1,j))
+               call add2s2(b(1,1,i),b(1,1,j),sc,nt)
+            endif
+         enddo
+         if (mdim.eq.ldim) then
+            sc=1./sqrt(vip(b(1,1,i),b(1,2,i),b(1,ldim,i),
+     $                     b(1,1,i),b(1,2,i),b(1,ldim,i)))
+            call opcmult(b(1,1,i),b(1,2,i),b(1,ldim,i),sc)
+         else if (mdim.eq.1) then
+            sc=1./sqrt(sip(b(1,1,i),b(1,1,i)))
+            call cmult(b(1,1,i),sc,nt)
+         endif
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine setab(uxyz,uvwb,uvwb0)
+
+      ! generate augmented basis from ABM
+
+      ! uxyz  := ABM mode
+      ! uvwb  := original basis mode
+      ! uvwb0 := original basis mode or 0th mode
+
+      include 'SIZE'
+      include 'TOTAL'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+      common /scrns/ txyz(lt,ldim)
+
+      real uxyz(lt,ldim),uvwb(lt,ldim),uvwb0(lt,ldim)
+
+      call evalcflds(uxyz,uvwb,uvwb0,ldim,1,.true.)
+      call evalcflds(txyz,uvwb0,uvwb,ldim,1,.true.)
+      call opadd2(uxyz(1,1),uxyz(1,2),uxyz(1,ldim),
+     $            txyz(1,1),txyz(1,2),txyz(1,ldim))
+
+
+      call opbinv1(uxyz(1,1),uxyz(1,2),uxyz(1,ldim),
+     $             uxyz(1,1),uxyz(1,2),uxyz(1,ldim),1.)
+
+      call incomprn(uxyz(1,1),uxyz(1,2),uxyz(1,ldim),prlag)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine rbf_setup(rbfwt,rbf_sigma,edk,anch,ns,nb)
+
+      ! Setup RBF Method, compute sigma and weight based 
+      ! on edk and anch arrays
+
+      ! Output : rbfwt, rbf_sigma
+      ! Input  : edk, anch, ns, nb
+
+      ! rbfwt := rbf weight
+      ! rbf_sigma:= variance used in rbf
+      ! (anch, edk) := sample points
+      ! ns := number of sample points
+      ! nb := number of modes
+
+      real rbfwt(ns,nb)   ! rbf matrix and weight
+      real rbf_sigma(nb)  ! rbf parameter
+      real edk(0:nb,ns)   ! rbf data value
+      real anch(ns)       ! rbf data point
+      integer ns,nb
+
+      call set_rbf_sig(rbf_sigma,edk,anch,ns,nb)
+      call c_rbfwt(rbfwt,rbf_sigma,edk,anch,ns,nb)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_rbf_sig(rbf_sigma,edk,anch,ns,nb)
+
+      ! Compute RBF sigma based on edk and anch arrays
+
+      ! Output : rbf_sigma
+      ! Input  : edk, anch, ns, nb
+
+      ! rbf_sigma:= variance used in rbf
+      ! (anch, edk) := sample points
+      ! ns := number of sample points
+      ! nb := number of modes
+
+      real rbf_sigma(nb)                 ! rbf parameter
+      real edk(0:nb,ns),edkk(ns,0:nb)    ! rbf data value
+      real anch(ns)                      ! rbf data point
+      real rbftmp1(ns**2)                ! array used in invmat
+      integer ns,nb
+
+      real rbf_mean
+
+      open(unit=11,file='anch')
+      do i=1,ns
+         read(11,*) anch(i)
+      enddo
+      close(11)
+
+      ! transpose
+      call transpose(edkk,ns,edk,nb+1)
+
+      do k=1,nb
+         call copy(rbftmp1,edkk(1,k),ns)
+         rbf_mean = vlsum(rbftmp1,ns)/ns
+         call cadd(rbftmp1,-1.0*rbf_mean,ns)
+         call vsq(rbftmp1,ns)
+         rbf_sigma(k) = sqrt(vlsum(rbftmp1,ns)/ns)
+
+         write(6,*) 'rbf_sigma k:',k,rbf_sigma(k)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine c_rbfwt(rbfwt,rbf_sigma,edk,anch,ns,nb)
+
+      ! Compute RBF weight based on edk and anch arrays
+
+      ! Output : rbfwt
+      ! Input  : rbf_sigma, edk, anch, ns, nb
+
+      ! rbfwt := rbf weight
+      ! rbf_sigma:= variance used in rbf
+      ! (anch, edk) := sample points
+      ! ns := number of sample points
+      ! nb := number of modes
+
+      real rbfmat(ns,ns), rbfwt(ns,nb)   ! rbf matrix and weight
+      real rbf_sigma(nb)                 ! rbf parameter
+      real edk(0:nb,ns),edkk(ns,0:nb)    ! rbf data value
+      real anch(ns)                      ! rbf data point
+      real rbftmp1(ns**2),rbftmp2(ns**2) ! array used in invmat
+      integer itmp3(ns),itmp4(ns)
+      integer ns,nb
+
+      ! transpose
+      call transpose(edkk,ns,edk,nb+1)
+
+      do k=1,nb
+         write(6,*) 'mode k:',k,rbf_sigma(k),'Construct RBF matrix...'
+
+         ! setup rbf matrix
+         do j=1,ns
+         do i=1,ns
+            rbfmat(i,j) = exp(-1.*(anch(i)-anch(j))**2/
+     $                           (2*(rbf_sigma(k)**2)))
+         enddo
+         enddo
+
+         call invmat(rbftmp1,rbftmp2,rbfmat,itmp3,itmp4,ns)
+         call mxm(rbftmp1,ns,edkk(1,k),ns,rbfwt(1,k),1)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine rbf_interp(edv,test_p,rbfwt,rbf_sigma,anch,ns,nb)
+
+      real test_p, dist_p(ns)
+      real edv(nb),rbfwt(ns,nb),rbf_sigma(nb)
+      real anch(ns)
+
+      do k=1,nb
+         do j=1,ns
+            dist_p(j)=exp(-1.*(test_p-anch(j))**2/(2*(rbf_sigma(k)**2)))
+         enddo
+         edv(k) = vlsc2(rbfwt(1,k),dist_p,ns)
+      enddo
+
+      return
+      end
+c-----------------------------------------------------------------------
+      function abm_shuffle_helper(indo,nb,nsplit)
+
+      ! return shuffled index for a given original index
+
+      m = nint(1.0*(nb-1)/nsplit)
+
+      if (indo.le.m) then
+         abm_shuffle_helper=(indo-1)*nsplit+2
+      else if (indo.eq.m+1) then
+         abm_shuffle_helper=1
+      else if (indo.le.2*m+1) then
+         abm_shuffle_helper=(indo-2-m)*nsplit+3
+      else
+         abm_shuffle_helper=(indo-2-m*2)*nsplit+4
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine abm_shuffle
+
+      include 'SIZE'
+      include 'MOR'
+
+      do i=1,nb
+         indn=abm_shuffle_helper(i,nb,max(abs(iaug),2))
+         call opcopy(ub(1,indn),vb(1,indn),wb(1,indn),
+     $               uvwb(1,1,i),uvwb(1,2,i),uvwb(1,ldim,i))
+      enddo
+
+      do i=1,nb
+         call opcopy(uvwb(1,1,i),uvwb(1,2,i),uvwb(1,ldim,i),
+     $               ub(1,i),vb(1,i),wb(1,i))
+      enddo
 
       return
       end

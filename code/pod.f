@@ -1,70 +1,115 @@
 c-----------------------------------------------------------------------
       subroutine setbases
 
+      ! set ub,vb,wb,tb in /morbasis/ with pod basis
+
       include 'SIZE'
-      include 'TOTAL'
       include 'MOR'
+      include 'SOLN'
+      include 'MASS'
+      include 'TSTEP'
+      include 'INPUT'
 
       parameter (lt=lx1*ly1*lz1*lelt)
-
-      real u0(lt,3)
-
       if (nio.eq.0) write (6,*) 'inside setbases'
+
+      nv=lx1*ly1*lz1*nelv
+      nt=lx1*ly1*lz1*nelt
 
       call nekgsync
       bas_time=dnekclock()
-
-      n=lx1*ly1*lz1*nelt
 
       if (rmode.ne.'ON ') ifrecon=.true.
 
       if (rmode.eq.'ONB'.or.rmode.eq.'CP ') then
          call loadbases
-      else if (rmode.eq.'ALL'.or.rmode.eq.'OFF') then
-         n=lx1*ly1*lz1*nelt
-
-         do i=1,nb
-            call rzero(ub(1,i),n)
-            call rzero(vb(1,i),n)
-            if (ldim.eq.3) call rzero(wb(1,i),n)
-         enddo
-
-         ! ub, vb, wb, are the modes
+      else if (rmode.eq.'ALL'.or.rmode.eq.'OFF'.or.rmode.eq.'AEQ') then
          if (ifrom(1)) then
-           do j=1,ns
-           do i=1,nb
-              call opadds(ub(1,i),vb(1,i),wb(1,i),
-     $           us0(1,1,j),us0(1,2,j),us0(1,ldim,j),evec(j,i,1),n,2)
-           enddo
-           enddo
-
-           call vnorm(ub,vb,wb)
+            call pod(
+     $         uvwb(1,1,1),eval,ug,us0,ldim,ips,nb,ns,ifpb,'ops/gu  ')
+            if (ifcflow) call set0flow(uvwb(1,1,1),nb,idirf)
+            do ib=1,nb
+               call opcopy(ub(1,ib),vb(1,ib),wb(1,ib),
+     $            uvwb(1,1,ib),uvwb(1,2,ib),uvwb(1,ldim,ib))
+            enddo
+            if (.not.ifcomb.and.ifpb) call vnorm(ub,vb,wb)
          else
             call opcopy(ub,vb,wb,uic,vic,wic)
          endif
-
          if (ifrom(2)) then
-            do i=1,nb
-               call rzero(tb(1,i),n)
-               do j=1,ns
-                  call add2s2(tb(1,i),ts0(1,j),evec(j,i,2),n)
+            call pod(tb(1,1,1),eval,ug,ts0(1,1,1),1,ips,
+     $               nb,ns,ifpb,'ops/gt  ')
+            if (.not.ifcomb.and.ifpb) call snorm(tb)
+         endif
+         if (ifedvs) then
+            call pod(tb(1,1,4),eval,ug,ts0(1,1,4),1,ips,nb
+     $              ,ns,ifpb,'ops/ged ')
+c           if (.not.ifcomb.and.ifpb) call snorm(edb)
+         endif
+
+         if (ifcomb.and.ifpb) call cnorm(ub,vb,wb,tb)
+
+         ! z = \zeta
+         ! iaug = 1: Pi_incomprn {z_0 \cdot \nabla z + z \cdot \nabla z_0}
+         ! iaug = 2: Pi_incomprn {z \cdot \nabla z}
+         ! iaug = 3: iaug = 1 + iaug = 2
+
+         if (iaug.ne.0) then
+            if (abs(iaug).le.2) then
+               m=(nb-1)/2
+               nb=m*2+1
+            else
+               m=(nb-1)/3
+               nb=m*3+1
+            endif
+
+            ic=1+m
+
+            if (abs(iaug).eq.1) then
+               do i=0,m
+                  call setab(uvwb(1,1,ic),uvwb(1,1,i),uvwb(1,1,0))
+                  ic=ic+1
                enddo
+            else if (abs(iaug).eq.2) then
+               do i=0,m
+                  call setab(uvwb(1,1,ic),uvwb(1,1,i),uvwb(1,1,i))
+                  ic=ic+1
+               enddo
+            else
+               do i=0,m
+                  call setab(uvwb(1,1,ic),uvwb(1,1,i),uvwb(1,1,0))
+                  ic=ic+1
+               enddo
+               do i=1,m
+                  call setab(uvwb(1,1,ic),uvwb(1,1,i),uvwb(1,1,i))
+                  ic=ic+1
+               enddo
+            endif
+
+            ! orthonormalize velocity basis
+            if (iaug.lt.0) call abm_shuffle
+            call orthonormb(uvwb(1,1,1),ldim,nb)
+
+            do i=1,nb
+               call opcopy(ub(1,i),vb(1,i),wb(1,i),
+     $            uvwb(1,1,i),uvwb(1,2,i),uvwb(1,ldim,i))
             enddo
-            call snorm(tb)
          endif
       endif
-
-      if (rmode.eq.'ALL'.or.rmode.eq.'OFF') call dump_bas
-
       call nekgsync
       if (nio.eq.0) write (6,*) 'bas_time:',dnekclock()-bas_time
-
       if (nio.eq.0) write (6,*) 'exiting setbases'
 
       return
       end
 c-----------------------------------------------------------------------
       subroutine ps2k(ck,ux,uub)
+
+      ! set snapshot coefficients for a given scalar basis
+
+      ! ck  := coefficients
+      ! ux  := snapshots
+      ! uub := basis functions
 
       include 'SIZE'
       include 'TOTAL'
@@ -74,7 +119,7 @@ c-----------------------------------------------------------------------
 
       real ck(0:nb,ls),ux(lt,ls),uub(lt,0:nb)
 
-      if (rmode.eq.'ALL'.or.rmode.eq.'OFF') then
+      if (rmode.eq.'ALL'.or.rmode.eq.'OFF'.or.rmode.eq.'AEQ') then
          do i=1,ns
             if (nio.eq.0) write (6,*) 'ps2k: ',i,'/',ns
             nio=-1
@@ -90,6 +135,12 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine pv2k(ck,usnap,uub,vvb,wwb)
 
+      ! set snapshot coefficients for a given vector basis
+
+      ! ck           := coefficients
+      ! usnap        := snapshots
+      ! uub,vvb,wwb, := x,y,z components of basis functions
+
       include 'SIZE'
       include 'TOTAL'
       include 'MOR'
@@ -103,7 +154,7 @@ c-----------------------------------------------------------------------
 
       n=lx1*ly1*lz1*nelt
 
-      if (rmode.eq.'ALL'.or.rmode.eq.'OFF') then
+      if (rmode.eq.'ALL'.or.rmode.eq.'OFF'.or.rmode.eq.'AEQ') then
 c        if (ips.eq.'H10') then
 c           do j=1,ns
 c              call axhelm(uu,usnap(1,1,j),ones,zeros,1,1)
@@ -134,6 +185,12 @@ c        endif
 c-----------------------------------------------------------------------
       subroutine ps2b(coef,tt,sb)
 
+      ! get coordinates of a scalar field for a given basis
+
+      ! ck  := coordinates of <ux> in <uub>
+      ! ux  := FOM scalar field
+      ! uub := basis functions
+
       include 'SIZE'
       include 'MOR'
 
@@ -162,7 +219,46 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
+      subroutine ps2b1(coef,tt,sb,nb2)
+
+      ! get coordinates of a scalar field for a given basis w/o 0th mode
+
+      ! ck  := coordinates of <ux> in <uub>
+      ! ux  := FOM scalar field
+      ! uub := basis functions
+
+      include 'SIZE'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real coef(nb),tt(lt),sb(lt,nb)
+
+      if (nio.eq.0) write (6,*) 'inside ps2b1'
+
+      n=lx1*ly1*lz1*nelt
+
+      do i=1,nb2
+         ww=sip(sb(1,i),sb(1,i))
+         vv=sip(sb(1,i),tt)
+         coef(i) = vv/ww
+         if (nio.eq.0) write (6,1) coef(i),vv,ww,ips
+      enddo
+
+      if (nio.eq.0) write (6,*) 'exiting ps2b1'
+
+    1 format(' coef',1p3e16.8,1x,a3)
+
+      return
+      end
+c-----------------------------------------------------------------------
       subroutine pv2b(coef,ux,uy,uz,uub,vvb,wwb)
+
+      ! get coordinates of a vector field for a given basis
+
+      ! coef        := coordinates of <ux,uy,uz> in <uub,vvb,wwb>
+      ! ux,uy,uz    := x,y,z components of FOM field
+      ! uub,vvb,wwb := x,y,z components of basis functions
 
       include 'SIZE'
       include 'MOR'
@@ -200,7 +296,60 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
+      subroutine pc2b(cfu,cft,ux,uy,uz,tt,uub,vvb,wwb,ttb)
+
+      ! get coordinates of a combined field for a given basis
+
+      ! cfu & cft       := coords of <ux,uy,uz,tt> in <uub,vvb,wwb,ttb>
+      ! ux,uy,uz,tt     := vx,vy,vz,t components of combined FOM field
+      ! uub,vvb,wwb,ttb := vx,vy,vz,t components of basis functions
+
+      include 'SIZE'
+      include 'MOR'
+      include 'TOTAL'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real ux(lt),uy(lt),uz(lt),tt(lt)
+      real uub(lt,0:nb),vvb(lt,0:nb),wwb(lt,0:nb),ttb(lt,0:nb)
+      real cfu(0:nb),cft(0:nb)
+
+      if (nio.eq.0) write (6,*) 'inside pc2b'
+
+      n=lx1*ly1*lz1*nelt
+
+      cfu(0) = 1.
+      cft(0) = 1.
+      if (nio.eq.0) write (6,1) 0,cfu(0),cfu(0),1.
+
+      jfield=ifield
+      ifield=1
+
+      do i=1,nb
+         ww=cip(uub(1,i),vvb(1,i),wwb(1,i),ttb(1,i),
+     $          uub(1,i),vvb(1,i),wwb(1,i),ttb(1,i))
+         vv=cip(uub(1,i),vvb(1,i),wwb(1,i),ttb(1,i),ux,uy,uz,tt)
+         cfu(i) = vv/ww
+         cft(i) = cfu(i)
+         if (nio.eq.0) write (6,1) i,cfu(i),vv,ww,ips
+      enddo
+
+      ifield=jfield
+
+      if (nio.eq.0) write (6,*) 'exiting pc2b'
+
+    1 format('coef',i8,1p3e16.8,1x,a3)
+
+      return
+      end
+c-----------------------------------------------------------------------
       function sip(t1,t2)
+
+      ! return inner-product of scalar fields
+
+      ! t1,t2 := scalar fields
+      ! ips   := inner product type
+      !          (L2 = L_2, H10 = H^1_0, HLM = Helmholtz)
 
       include 'SIZE'
       include 'MOR'
@@ -225,6 +374,13 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       function vip(t1,t2,t3,t4,t5,t6)
 
+      ! return inner-product of vector fields
+
+      ! t1,t2,t3 := x,y,z components of field 1
+      ! t4,t5,t6 := x,y,z components of field 2
+      ! ips   := inner product type
+      !          (L2 = L_2, H10 = H^1_0, HLM = Helmholtz)
+
       include 'SIZE'
       include 'MOR'
 
@@ -246,7 +402,32 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      function h10sip_vd(t1,t2)
+      function cip(t1,t2,t3,t4,t5,t6,t7,t8)
+
+      ! return inner-product of vector fields
+
+      ! t1,t2,t3,t4 := vx,vy,vz,t components of field 1
+      ! t5,t6,t7,t8 := vx,vy,vz,t components of field 2
+
+      include 'SIZE'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real t1(lt),t2(lt),t3(lt),t4(lt),t5(lt),t6(lt),t7(lt),t8(lt)
+
+      cip=podrat*vip(t1,t2,t3,t5,t6,t7)+(1.-podrat)*sip(t4,t8)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      function h10sip_vd(t1,t2,vd)
+
+      ! return inner-product of scalar fields using the H^1_0
+      ! inner-product with an arbitrary diffusivity field
+
+      ! t1,t2 := scalar fields
+      ! vd := variable diffusivity
 
       include 'SIZE'
       include 'SOLN'
@@ -254,18 +435,22 @@ c-----------------------------------------------------------------------
 
       parameter (lt=lx1*ly1*lz1*lelt)
 
-      real t1(lt),t2(lt)
+      real t1(lt),t2(lt),vd(lt)
 
       common /scrip/ t3(lt)
 
-      call axhelm(t3,t1,vdiff,zeros,1,1)
-c     call dssum(t3,lx1,ly1,lz1)
+      call axhelm(t3,t1,vd,zeros,1,1)
       h10sip_vd=glsc2(t3,t2,lx1*ly1*lz1*nelt)
 
       return
       end
 c-----------------------------------------------------------------------
       function h10sip(t1,t2)
+
+      ! return inner-product of scalar fields using the H^1_0
+      ! inner-product
+
+      ! t1,t2 := scalar fields
 
       include 'SIZE'
       include 'INPUT'
@@ -284,6 +469,11 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       function h10vip(t1,t2,t3,t4,t5,t6)
+
+      ! return inner-product of vector fields using the H^1_0
+      ! inner-product
+
+      ! t1,t2,t3; t4,t5,t6 := x,y,z components of vector fields
 
       include 'SIZE'
       include 'INPUT'
@@ -311,7 +501,46 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
+      function h10vip_vd(t1,t2,t3,t4,t5,t6,vd)
+
+      ! return inner-product of vector fields using the H^1_0
+      ! inner-product with arbitrary diffusivity fields
+
+      ! t1,t2,t3; t4,t5,t6 := x,y,z components of vector fields
+      ! vd := variable diffusivity in multiple dimensions
+
+      include 'SIZE'
+      include 'INPUT'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real t1(lt),t2(lt),t3(lt),t4(lt),t5(lt),t6(lt),vd(lt,ldim)
+
+      common /scrip/ t7(lt),t8(lt),t9(lt)
+
+      n=lx1*ly1*lz1*nelt
+
+      call axhelm(t7,t1,vd(1,1),zeros,1,1)
+      h10vip_vd=glsc2(t7,t4,n)
+
+      call axhelm(t8,t2,vd(1,2),zeros,1,2)
+      h10vip_vd=h10vip_vd+glsc2(t8,t5,n)
+
+      if (ldim.eq.3) then
+         call axhelm(t9,t3,vd(1,3),zeros,1,3)
+         h10vip_vd=h10vip_vd+glsc2(t9,t6,n)
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
       function hlmsip(t1,t2)
+
+      ! return inner-product of scalar fields using the Helmholtz
+      ! inner-product
+
+      ! t1,t2 := scalar fields
 
       include 'SIZE'
       include 'MASS'
@@ -328,6 +557,11 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       function hlmvip(t1,t2,t3,t4,t5,t6)
 
+      ! return inner-product of vector fields using the Helmholtz
+      ! inner-product
+
+      ! t1,t2,t3; t4,t5,t6 := x,y,z components of vector fields
+
       include 'SIZE'
       include 'MOR'
 
@@ -341,7 +575,33 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
+      function wl2sip_vd(t1,t2,rho)
+
+      ! return inner-product of scalar fields using the L^2
+      ! inner-product
+
+      ! t1,t2 := scalar fields
+
+      include 'SIZE'
+      include 'MASS'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real t1(lt),t2(lt),rho(lt)
+
+      n=lx1*ly1*lz1*nelt
+
+      wl2sip_vd = glsc3(t1,t2,rho,n)
+
+      return
+      end
+c-----------------------------------------------------------------------
       function wl2sip(t1,t2)
+
+      ! return inner-product of scalar fields using the L^2
+      ! inner-product
+
+      ! t1,t2 := scalar fields
 
       include 'SIZE'
       include 'MASS'
@@ -359,6 +619,11 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       function wl2vip(t1,t2,t3,t4,t5,t6)
 
+      ! return inner-product of vector fields using the L^2
+      ! inner-product
+
+      ! t1,t2,t3; t4,t5,t6 := x,y,z components of vector fields
+
       include 'SIZE'
       include 'MASS'
 
@@ -371,48 +636,14 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      subroutine setgram
-
-      include 'SIZE'
-      include 'MOR'
-      include 'SOLN'
-
-      call nekgsync
-      sg_start=dnekclock()
-
-      if (rmode.eq.'ALL'.or.rmode.eq.'OFF') then
-         jfield=ifield
-         ifield=1
-         if (ifpod(1)) call gengram(ug(1,1,1),us0,ns,ldim)
-         ifield=2
-         if (ifpod(2)) call gengram(ug(1,1,2),ts0,ns,1)
-         ifield=jfield
-      endif
-
-      if (rmode.eq.'ALL'.or.rmode.eq.'OFF') call dump_gram
-
-      call nekgsync
-      if (nio.eq.0) write (6,*) 'gram_time:',dnekclock()-sg_start
-
-      return
-      end
-c-----------------------------------------------------------------------
-      subroutine setevec
-
-      include 'SIZE'
-      include 'MOR'
-
-      if (rmode.eq.'ALL'.or.rmode.eq.'OFF') then
-         do i=0,ldimt1
-            if (ifpod(i)) call
-     $         genevec(evec(1,1,i),eval(1,i),ug(1,1,i),i)
-         enddo
-      endif
-
-      return
-      end
-c-----------------------------------------------------------------------
       subroutine hlmgg(gram,s,ms,mdim)
+
+      ! set the Gramian based on the Helmholtz inner-product
+
+      ! gram := Gramian
+      ! s    := snapshots
+      ! ms   := number of snapshots
+      ! mdim := vector dimension
 
       include 'SIZE'
       include 'TOTAL'
@@ -465,6 +696,13 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine h10gg(gram,s,ms,mdim)
 
+      ! set the Gramian based on the H^1_0 inner-product
+
+      ! gram := Gramian
+      ! s    := snapshots
+      ! ms   := number of snapshots
+      ! mdim := vector dimension
+
       include 'SIZE'
       include 'TOTAL'
       include 'MOR'
@@ -505,6 +743,14 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine wl2gg(gram,s,ms,mdim)
 
+      ! set the Gramian based on the L^2 inner-product
+      ! (duplicate, will be deprecated)
+
+      ! gram := Gramian
+      ! s    := snapshots
+      ! ms   := number of snapshots
+      ! mdim := vector dimension
+
       include 'SIZE'
       include 'TOTAL'
       include 'MOR'
@@ -541,6 +787,13 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine gengraml2(gram,s,ms,mdim)
 
+      ! set the Gramian based on the L^2 inner-product
+
+      ! gram := Gramian
+      ! s    := snapshots
+      ! ms   := number of snapshots
+      ! mdim := vector dimension
+
       include 'SIZE'
       include 'TOTAL'
       include 'MOR'
@@ -574,22 +827,24 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      subroutine gengram(gram,s,ms,mdim)
+      subroutine gengram(gram,s,ms,mdim,cips)
 
-      include 'SIZE'
-      include 'TOTAL'
-      include 'MOR'
+      ! set the Gramian based on the inner-product set by ips
 
-      parameter (lt=lx1*ly1*lz1*lelt)
+      ! gram := Gramian
+      ! s    := snapshots
+      ! ms   := number of snapshots
+      ! mdim := vector dimension
+      ! cips := inner-product space specifier
 
-      real gram(ms,ms)
-      real s(lt,mdim,ms)
+      real gram(1),s(1)
+      character*3 cips
 
-      if (ips.eq.'L2 ') then
+      if (cips.eq.'L2 ') then
          call gengraml2(gram,s,ms,mdim)
-      else if (ips.eq.'H10') then
+      else if (cips.eq.'H10') then
          call h10gg(gram,s,ms,mdim)
-      else if (ips.eq.'HLM') then
+      else if (cips.eq.'HLM') then
          call hlmgg(gram,s,ms,mdim)
       else
          if (nid.eq.0) write (6,*) 'unsupported ips in gengram'
@@ -599,52 +854,46 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      subroutine genevec(vec,val,gram,ifld)
+      subroutine genevec(vec,val,ms,mb,ifld)
 
-      !!! does not work if ns.lt.ls !!!
+      ! solve eigensystem based on the given Gramian (vec)
+
+      ! vec  := eigenvectors (initially Gramian)
+      ! val  := eigenvalues
+      ! ms   := number of snapshots
+      ! mb   := number of basis
+      ! ifld := field number
 
       include 'SIZE'
       include 'TSTEP'
-      include 'MOR'
+      include 'LMOR'
 
-      parameter (lt=lx1*ly1*lz1*lelt)
-
-      integer icalld
-      save    icalld
-      data    icalld /0/
+      parameter (lwork=5*ls)
       
-      common /scrgvec/ gc(ls,ls),wk(ls,ls)
+      common /scrgvec/ wk(lwork)
 
-      real gram(ls,ls),vec(ls,ls),val(ls)
+      real vec(ms,ms),val(ms)
 
       if (nio.eq.0) write (6,*) 'inside genevec'
 
       call nekgsync
       eig_time=dnekclock()
 
-      if (icalld.eq.0) then
-         icalld=1
-      endif
+      call regularev(vec,val,ms,wk,lwork)
 
-      call copy(gc,gram,ls*ls)
-
-      call regularev(gc,val,ls,wk)
-      call copy(wk,gc,ls*ls)
+      do i=1,ms/2
+         call copy(wk,vec(1,i),ms)
+         call copy(vec(1,i),vec(1,ms-i+1),ms)
+         call copy(vec(1,ms-i+1),wk,ms)
+         tmp=val(i)
+         val(i)=val(ms-i+1)
+         val(ms-i+1)=tmp
+      enddo
 
       call nekgsync
       eval_time=dnekclock()
 
-      do l = 1,ls
-         call copy(vec(1,l),wk(1,ls-l+1),ls) ! reverse order of wk
-      enddo
-
-      call copy(wk,val,ns)
-
-      do i=1,ns
-         val(i)=wk(ns-i+1,1)
-      enddo
-
-      do i=1,ns
+      do i=1,ms
          if (nio.eq.0) write (6,'(i5,1p1e16.6,3x,a,i1)')
      $      i,val(i),'eval',ifld
       enddo
@@ -660,7 +909,40 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
+      subroutine vnorm_(uvwbb)
+
+      ! normalizes vector field
+
+      ! uub,vvb,wwb := x,y,z components of vector field
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real uvwbb(lt,ldim,0:nb)
+
+      jfield=ifield
+      ifield=1
+      nio=-1
+      do i=1,nb
+         p=vip(uvwbb(1,1,i),uvwbb(1,2,i),uvwbb(1,ldim,i),
+     $         uvwbb(1,1,i),uvwbb(1,2,i),uvwbb(1,ldim,i))
+         s=1./sqrt(p)
+         call opcmult(uvwbb(1,1,i),uvwbb(1,2,i),uvwbb(1,3,i),s)
+      enddo
+      nio=nid
+      ifield=jfield
+
+      return
+      end
+c-----------------------------------------------------------------------
       subroutine vnorm(uub,vvb,wwb)
+
+      ! normalizes vector field
+
+      ! uub,vvb,wwb := x,y,z components of vector field
 
       include 'SIZE'
       include 'TOTAL'
@@ -684,7 +966,41 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
+      subroutine cnorm(uub,vvb,wwb,ttb)
+
+      ! normalizes combined field
+
+      ! uub,vvb,wwb,ttb := vx,vy,vz,t components of vector field
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real uub(lt,0:nb),vvb(lt,0:nb),wwb(lt,0:nb),ttb(lt,0:nb)
+
+      jfield=ifield
+      ifield=1
+      nio=-1
+      do i=1,nb
+         p=cip(uub(1,i),vvb(1,i),wwb(1,i),ttb(1,i),
+     $         uub(1,i),vvb(1,i),wwb(1,i),ttb(1,i))
+         s=1./sqrt(p)
+         call opcmult(uub(1,i),vvb(1,i),wwb(1,i),s)
+         call cmult(ttb(1,i),s,lx1*ly1*lz1*nelt)
+      enddo
+      nio=nid
+      ifield=jfield
+
+      return
+      end
+c-----------------------------------------------------------------------
       subroutine snorm(ssb)
+
+      ! normalizes scalar field
+
+      ! ssb := scalar field
 
       include 'SIZE'
       include 'TOTAL'
@@ -706,6 +1022,12 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       subroutine h10pv2b(coef,ux,uy,uz,uub,vvb,wwb)
+
+      ! get coordinates of a vector field for a H^1_0 orthogonal basis
+
+      ! coef        := coordinates of <ux,uy,uz> in <uub,vvb,wwb>
+      ! ux,uy,uz    := x,y,z components of FOM field
+      ! uub,vvb,wwb := x,y,z components of basis functions
 
       include 'SIZE'
       include 'INPUT'
@@ -753,6 +1075,12 @@ c-----------------------------------------------------------------------
       end
 c-----------------------------------------------------------------------
       subroutine hlmpv2b(coef,ux,uy,uz,uub,vvb,wwb)
+
+      ! get coordinates of a vector field for a Helmholtz orthogonal basis
+
+      ! coef        := coordinates of <ux,uy,uz> in <uub,vvb,wwb>
+      ! ux,uy,uz    := x,y,z components of FOM field
+      ! uub,vvb,wwb := x,y,z components of basis functions
 
       include 'SIZE'
       include 'MASS'
@@ -809,8 +1137,8 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      subroutine regularev(a,lam,n,wk)
-c
+      subroutine regularev(a,lam,n,wk,lwork)
+ 
 c     Solve the eigenvalue problem  A x = lam x
 c
 c     A -- symmetric matrix
@@ -827,7 +1155,7 @@ c     should be called.
 
       call copy(aa,a,100)
 
-      call dsyev('V','U',n,a,n,lam,wk,n*n,info)
+      call dsyev('V','U',n,a,n,lam,wk,lwork,info)
 
       if (info.ne.0) then
          if (nid.eq.0) then
@@ -839,6 +1167,167 @@ c     should be called.
          ninf = n-info
          write(6,*) 'Error in regularev, info=',info,n,ninf
          call exitt
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine cnmax(val,fname,ifld)
+
+      ! compute maximum number of POD modes to be used
+
+      ! val   := eigenvalues based on the generated Gramians
+      ! fname := filename that will be created
+      ! ifld  := field number
+
+      include 'SIZE'
+      include 'TSTEP'
+      include 'MOR'
+
+      integer icalld
+      save    icalld
+      data    icalld /0/
+      
+      real val(ls)
+      real total,ena(ls),enl(ls)
+      character*128 fname
+
+      if (nio.eq.0) write (6,*) 'inside cnmax'
+
+      call nekgsync
+
+      if (icalld.eq.0) then
+         icalld=1
+      endif
+
+c     total=vlsum(val,ls)
+      total=0
+      do i=1,ns
+         total=total+val(ns-i+1) 
+         if (nio.eq.0) write(6,*)i,total,val(ns-i+1),'total'
+      enddo
+      ena(1) = val(ns)
+      enl(1) = sqrt(total-ena(1))/sqrt(total)
+      do i=2,ns
+        ena(i)=ena(i-1)+val(ns-i+1)
+        enl(i) = sqrt(total-ena(i))/sqrt(total)
+        if (enl(i).le.1e-4) then 
+        if (icalld.eq.1) then
+           if (nio.eq.0) write(6,*)i,enl(i),'cnmax Nmax for field',ifld
+           icalld=2
+        endif
+        endif
+      enddo
+      
+      call dump_serial(enl,ns,fname,nid)
+
+      call nekgsync
+
+      icalld=0
+
+      if (nio.eq.0) write (6,*) 'exiting cnmax'
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine cenpm(val,fname,ifld)
+
+      ! compute the percentage that each POD mode represents in the
+      ! total averaged energy. The energy is defined based on the
+      ! inner-product set by ips
+
+      ! val   := eigenvalues based on the generated Gramians
+      ! fname := filename that will be created
+      ! ifld  := field number
+
+      include 'SIZE'
+      include 'TSTEP'
+      include 'MOR'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      integer icalld
+      save    icalld
+      data    icalld /0/
+      
+      real val(ls)
+      real total,enr(ls)
+      character*128 fname
+
+      if (nio.eq.0) write (6,*) 'inside cenpm'
+
+      call nekgsync
+
+      if (icalld.eq.0) then
+         icalld=1
+      endif
+
+      total=0
+      do i=1,ns
+         total=total+val(ns-i+1) 
+         if (nio.eq.0) write(6,*)i,total,val(ns-i+1),'total'
+      enddo
+      do i=1,ns
+        enr(i)=val(ns-i+1)/total
+c       if (nio.eq.0) write(6,*)i,enr(i),'Nmax for field',ifld
+        if (enr(i).le.1e-3) then 
+        if (icalld.eq.1) then
+           if (nio.eq.0) write(6,*)i,enr(i),'cenpm Nmax for field',ifld
+           icalld=2
+        endif
+        endif
+      enddo
+      
+      call dump_serial(enr,ns,fname,nid)
+
+      call nekgsync
+
+      icalld=0
+
+      if (nio.eq.0) write (6,*) 'exiting cenpm'
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine pod(basis,eval,gram,snaps,mdim,cips,nb,ns,ifpod,cop)
+
+      ! return pod basis created from snapshots
+
+      ! basis := POD basis generated from snaps
+      ! eval  := e-values to be set in genevec
+      ! gram  := Gramian set in gengram
+      ! snaps := snapshots of solution field
+      ! mdim  := dimension of vector in snaps fields
+      ! cips  := inner-product space used from Gramian
+      ! nb    := number of desired POD basis
+      ! ns    := number of snapshots
+      ! ifpod := apply POD procedure
+      ! cop   := Gramian dump target
+
+      include 'SIZE'
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+
+      real basis(lt,mdim,nb),snaps(lt,mdim,ns),
+     $   eval(ns),gram(ns,ns)
+
+      character*3 cips
+      character*8 cop
+
+      logical ifpod
+
+      n=lx1*ly1*lz1*nelt
+
+      call gengram(gram,snaps,ns,mdim,cips)
+
+      call dump_serial(gram,ns*ns,cop,nid)
+
+      if (ifpod) then
+         call genevec(gram,eval,ns,nb,mdim)
+         do i=1,mdim
+            call dgemm('N','N',n,nb,ns,1.,
+     $         snaps(1,i,1),lt*mdim,gram,ns,0.,basis(1,i,1),lt*mdim)
+         enddo
       endif
 
       return

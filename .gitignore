@@ -21,6 +21,7 @@ runs
 docs
 cases
 archive
+examples
 
 # File types
 
@@ -38,6 +39,7 @@ archive
 *.dra
 out.*
 *.png
+*.bbproject*
 
 # Visit
 

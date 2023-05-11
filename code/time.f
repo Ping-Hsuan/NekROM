@@ -8,6 +8,8 @@ c-----------------------------------------------------------------------
       common /scrbdfext/ rhs(0:lb,2),rhstmp(0:lb),
      $                   utmp1(0:lb),utmp2(0:lb)
 
+      common /eddyma/ cedm((lb**2-1)*ledvis+1),cedvec((lb-1)*ledvis+1)
+
       logical ifdebug
       integer chekbc
 
@@ -15,6 +17,7 @@ c-----------------------------------------------------------------------
 
       ifdebug=.true.
       ifdebug=.false.
+      jfield=ifield
 
       ulast_time = dnekclock()
 
@@ -24,8 +27,6 @@ c-----------------------------------------------------------------------
 
       rhs(0,1)=1.
       rhs(0,2)=1.
-
-      call checker('bab',ad_step)
 
 c     if (icount.le.2) then
       if (.false.) then
@@ -41,21 +42,19 @@ c     if (icount.le.2) then
 
          if (ifrom(1)) then
             call copy(rhs(1,1),urko,nb)
-            call shift3(u,rhs,nb+1)
+            call shift(u,rhs,nb+1,3)
          endif
          if (ifrom(2)) then
             call copy(rhs(1,2),urko(nb+1),nb)
-            call shift3(ut,rhs(0,2),nb+1)
+            call shift(ut,rhs(0,2),nb+1,3)
          endif
          return
       endif
 
-      call checker('bac',ad_step)
-
+      ifield=2
       if (ifrom(2)) then
          if (ad_step.le.3) then
             ttime=dnekclock()
-            call checker('bad',ad_step)
             call seth(hlm(1,2),at,bt,1./ad_pe)
             if (ad_step.eq.3)
      $         call dump_serial(hlm(1,2),nb*nb,'ops/ht ',nid)
@@ -64,31 +63,42 @@ c     if (icount.le.2) then
                hlm(i+(j-1)*(nb-nplay),2)=hlm(i+nplay+(j+nplay-1)*nb,2)
             enddo
             enddo
-            if (ifdecpl) then
-               call copy(hinv(1,2),hlm(1,2),(nb-nplay)**2)
-               call diag(hinv(1,2),wt(1,2),rhs(1,2),nb)
-            else
-               call invmat(hinv(1,2),hlu(1,2),hlm(1,2),
-     $         ihlu(1,2),ihlu2(1,2),nb-nplay)
-               call rzero(wt(1,2),(nb-nplay)**2)
-               do i=1,nb-nplay
-                  wt(i+(nb-nplay)*(i-1),2)=1.
-               enddo
+            if (.not.ifcomb) then
+               if (ifdecpl) then
+                  call copy(hinv(1,2),hlm(1,2),(nb-nplay)**2)
+                  call diag(hinv(1,2),wt(1,2),rhs(1,2),nb)
+               else
+                  call invmat(hinv(1,2),hlu(1,2),hlm(1,2),
+     $            ihlu(1,2),ihlu2(1,2),nb-nplay)
+                  call rzero(wt(1,2),(nb-nplay)**2)
+                  do i=1,nb-nplay
+                     wt(i+(nb-nplay)*(i-1),2)=1.
+                  enddo
+               endif
             endif
             lu_time=lu_time+dnekclock()-ttime
-            call checker('bae',ad_step)
-            call update_k
+            call update_k(uk,ukp,tk,tkp)
          endif
 
+         call rom_userfop
+
          call setr_t(rhs(1,2),icount)
+         call rom_userrhs(rhs(1,2))
 
          ttime=dnekclock()
+         if (.not.ifcomb) then
          if (isolve.eq.0) then
             call mxm(wt(1,2),nb,rhs(1,2),nb,rhstmp(1),1)
             call mxm(hinv(1,2),nb,rhstmp(1),nb,rhs(1,2),1)
+            if (ifdecpl) then
+            eps=1.e-3
+            do i=1,nb
+               if (rhs(i,2).gt.tpmax(i)) rhs(i,2)=tpmax(i)-tpdis(i)*eps
+               if (rhs(i,2).lt.tpmin(i)) rhs(i,2)=tpmin(i)+tpdis(i)*eps
+            enddo
+            endif
             call mxm(rhs(1,2),1,wt(1,2),nb,rhstmp(1),nb)
             call copy(rhs(1,2),rhstmp(1),nb)
-            call checker('baf',ad_step)
          else
             scopt='tcopt'
             call mxm(ut,nb+1,ad_alpha(1,icount),icount,utmp1,1)
@@ -104,61 +114,71 @@ c     if (icount.le.2) then
      $                           tbarr0,tbarrseq,tcopt_count)
             call mxm(rhstmp(1),1,wt(1,2),nb,rhs(1,2),nb)
          endif
+
+         if (cfloc.eq.'POST') then
+         if (cftype.eq.'TFUN') then
+            call pod_proj(rhs(1,2),rbf,nb,'step  ')
+         else if (cftype.eq.'DIFF') then
+            call pod_df(rhs(1,2))
+         endif
+         endif
+
          tsolve_time=tsolve_time+dnekclock()-ttime
-         if (nplay.gt.0) then
-            do i=1,nplay
-               rhs(i,2)=tk(i,ad_step)
-            enddo
          endif
       endif
 
-      call checker('bag',ad_step)
-
+      ifield=1
       if (ifrom(1)) then
          if (ad_step.le.3) then
             ttime=dnekclock()
             call seth(hlm,au,bu,1./ad_re)
-            call checkera('bah',hlm,nb*nb,ad_step)
+            if (ifedvs) then
+               edv(0) = 1
+               edv(1) = 1
+               call addeddy(hlm,cedm,cedvec,cedd,edv)
+            endif
             if (ad_step.eq.3) call dump_serial(hlm,nb*nb,'ops/hu ',nid)
             do j=1,nb-nplay
             do i=1,nb-nplay
                hlm(i+(j-1)*(nb-nplay),1)=hlm(i+nplay+(j+nplay-1)*nb,1)
             enddo
             enddo
-            call checkera('bai',hlm,nb*nb,ad_step)
             if (nio.eq.0) write (6,*) 'check ifdecpl',ifdecpl,'cp3'
-            if (ifdecpl) then
-               call copy(hinv,hlm,(nb-nplay)**2)
-               call diag(hinv,wt,rhs(1,1),nb)
-            else
-               call invmat(hinv,hlu,hlm,ihlu,ihlu2,nb-nplay)
-            if (nio.eq.0) write (6,*) 'check nplay',nplay,'cp3'
-               call checkera('baj',hinv,nb*nb,ad_step)
-               call rzero(wt,(nb-nplay)**2)
-               do i=1,nb-nplay
-                  wt(i+(nb-nplay)*(i-1),1)=1.
-               enddo
+            if (.not.ifcomb) then
+               if (ifdecpl) then
+                  call copy(hinv,hlm,(nb-nplay)**2)
+                  call diag(hinv,wt,rhs(1,1),nb)
+               else
+                  call invmat(hinv,hlu,hlm,ihlu,ihlu2,nb-nplay)
+               if (nio.eq.0) write (6,*) 'check nplay',nplay,'cp3'
+                  call rzero(wt,(nb-nplay)**2)
+                  do i=1,nb-nplay
+                     wt(i+(nb-nplay)*(i-1),1)=1.
+                  enddo
+               endif
             endif
             lu_time=lu_time+dnekclock()-ttime
-            call update_k
+            call update_k(uk,ukp,tk,tkp)
          endif
 
+         call rom_userfop
+
          call setr_v(rhs(1,1),icount)
+         call rom_userrhs(rhs(1,1))
 
          ttime=dnekclock()
+         if (.not.ifcomb) then
          if ((isolve.eq.0).or.(icopt.eq.2)) then ! standard matrix inversion
             call mxm(wt,nb,rhs(1,1),nb,rhstmp(1),1)
-            call checkera('bak',rhstmp(1),nb,ad_step)
             call mxm(hinv,nb,rhstmp(1),nb,rhs(1,1),1)
-            call checkera('bal',hinv(1,1),nb*nb,ad_step)
             if (ifdecpl) then
+            eps=1.e-3
             do i=1,nb
                if (rhs(i,1).gt.upmax(i)) rhs(i,1)=upmax(i)-updis(i)*eps
                if (rhs(i,1).lt.upmin(i)) rhs(i,1)=upmin(i)+updis(i)*eps
             enddo
             endif
             call mxm(rhs(1,1),1,wt,nb,rhstmp(1),nb)
-            call checkera('bam',rhstmp(1),nb,ad_step)
             call copy(rhs(1,1),rhstmp(1),nb)
          else 
             scopt='ucopt'
@@ -175,19 +195,56 @@ c     if (icount.le.2) then
             call mxm(rhstmp(1),1,wt,nb,rhs(1,1),nb)
 
          endif
-         call checkera('ban',rhstmp(1),nb,ad_step)
-         solve_time=solve_time+dnekclock()-ttime
-         if (nplay.gt.0) then
-            do i=1,nplay
-               rhs(i,1)=uk(i,ad_step)
-            enddo
          endif
+
+         if (cfloc.eq.'POST') then
+         if (cftype.eq.'TFUN') then
+            call pod_proj(rhs(1,1),rbf,nb,'step  ')
+         else if (cftype.eq.'DIFF') then
+            call pod_df(rhs(1,1))
+         endif
+         endif
+
+         solve_time=solve_time+dnekclock()-ttime
       endif
 
-      if (ifrom(2)) call shift3(ut,rhs(0,2),nb+1)
-         call checker('bal',ad_step)
-      if (ifrom(1)) call shift3(u,rhs,nb+1)
-         call checker('bao',ad_step)
+      if (ifcomb) then
+         if (ad_step.le.3) then
+            call add2(hlm(1,1),hlm(1,2),(nb+1)**2)
+            if (ifdecpl) then
+               call copy(hinv(1,1),hlm(1,1),(nb-nplay)**2)
+               call diag(hinv(1,1),wt(1,1),utmp1,nb)
+            else
+               call invmat(hinv(1,1),hlu(1,1),hlm(1,1),
+     $         ihlu(1,1),ihlu2(1,1),nb-nplay)
+               call rzero(wt(1,1),(nb-nplay)**2)
+               do i=1,nb-nplay
+                  wt(i+(nb-nplay)*(i-1),1)=1.
+               enddo
+            endif
+         endif
+         call add2(rhs(1,1),rhs(1,2),(nb+1)**2)
+
+         call mxm(wt,nb,rhs(1,1),nb,rhstmp(1),1)
+         call mxm(hinv,nb,rhstmp(1),nb,rhs(1,1),1)
+         if (ifdecpl) then
+            do i=1,nb
+               if (rhs(i,1).gt.upmax(i)) rhs(i,1)=upmax(i)-updis(i)*eps
+               if (rhs(i,1).lt.upmin(i)) rhs(i,1)=upmin(i)+updis(i)*eps
+            enddo
+         endif
+         call mxm(rhs(1,1),1,wt,nb,rhstmp(1),nb)
+         call copy(rhs(1,1),rhstmp(1),nb)
+         call copy(rhs(1,2),rhs(1,1),nb)
+      endif
+
+      if (cfloc.eq.'POST'.and.cftype.eq.'POLY')
+     $   call apply_les_imp(rhs(0,1),rhs(0,2),rdft,fles1,fles2,rtmp1)
+
+      if (ifrom(2)) call shift(ut,rhs(0,2),nb+1,5)
+      if (ifrom(1)) call shift(u,rhs,nb+1,5)
+
+      ifield=jfield
 
       ustep_time=ustep_time+dnekclock()-ulast_time
 
@@ -212,6 +269,8 @@ c-----------------------------------------------------------------------
 
       real vort(lt)
 
+      call rom_userchk
+
       if (icalld.eq.0) then
          post_time=0.
          icalld=1
@@ -222,59 +281,22 @@ c-----------------------------------------------------------------------
 
       if (ifrom(1)) then
          call setuavg(ua,u2a,u)
-         call setuj(uj,u2j,u)
          call count_gal(num_galu,anum_galu,rhstmp(1),upmax,upmin,
      $   1e-16,nb)
       endif
 
       if (ifrom(2)) then
          call settavg(uta,uuta,utua,ut2a,u,ut)
-         call settj(utj,uutj,utuj,uj,ut)
          call count_gal(num_galt,anum_galt,ut(1),tmax,tmin,1e-16,nb)
       endif
+
+      if (ifei) call set_time_avg_resid_coef
 
       if (mod(ad_step,ad_qstep).eq.0) then
          if (ifctke) call ctke
          if (ifcdrag) call cdrag
          call cnuss
 c        call cubar
-      endif
-
-      if (ifplay.and.mod(ad_step,10).eq.0) then
-         do j=1,nb
-            if (nio.eq.0) write (6,2) ad_step,time,j,u(j),uk(j,ad_step)
-         enddo
-
-         call sub3(rtmp1,u(1),uk(1,ad_step),nb)
-         call mxm(bu,nb,rtmp1,nb,rtmp2,1)
-         err=vlsc2(rtmp2,rtmp1,nb)
-
-         call mxm(bu0,nb+1,u,nb+1,rtmp3,1)
-         sl2=vlsc2(rtmp3,u,nb+1)
-
-         rerr=err/sl2
-
-         if (nio.eq.0) write (6,1)
-     $      ad_step,time,err,sl2,rerr,nplay,nb,' errf'
-
-         err=0.
-         sl2=0.
-         if (nplay.ne.nb) then
-            do j=nplay+1,nb
-            do i=nplay+1,nb
-               err=err+rtmp1(i,1)*bu(i+(j-1)*nb)*rtmp1(j,1)
-               sl2=sl2+u(i)*bu(i+(j-1)*nb)*u(j)
-            enddo
-            enddo
-            err=sqrt(err)
-            sl2=sqrt(sl2)
-         endif
-
-         rerr=0.
-         if (sl2.ne.0.) rerr=err/sl2
-
-         if (nio.eq.0) write (6,1)
-     $      ad_step,time,err,sl2,rerr,nplay,nb,' err2'
       endif
 
       if (mod(ad_step,ad_iostep).eq.0) then
@@ -290,7 +312,7 @@ c        call cubar
             enddo
          endif
 
-         if (rmode.ne.'ON ') then
+         if (ifrecon) then
             jstep=istep
             call reconv(vx,vy,vz,u)
             call opcopy(t1,t2,t3,vx,vy,vz)
@@ -336,47 +358,47 @@ c        call cubar
       return
       end
 c-----------------------------------------------------------------------
-      subroutine compute_BDF_coef(ad_alpha,ad_beta)
+      subroutine set_bdf_coef(ad_alpha,ad_beta)
 
-      real ad_alpha(3,3), ad_beta(4,3)
+      real ad_alpha(3,3),ad_beta(4,3)
 
       call rzero(ad_alpha,3*3)
       call rzero(ad_beta,3*4)
 
-      ad_beta(1,1) = 1.
-      ad_beta(2,1) = -1.
+      ad_beta(1,1)  =  1.
+      ad_beta(2,1)  = -1.
 
-      ad_beta(1,2) = 1.5
-      ad_beta(2,2) = -2
-      ad_beta(3,2) = 0.5
+      ad_beta(1,2)  =  1.5
+      ad_beta(2,2)  = -2
+      ad_beta(3,2)  =  0.5
 
-      ad_beta(1,3) = 11./6
-      ad_beta(2,3) = -3
-      ad_beta(3,3) = 1.5
-      ad_beta(4,3) = -1./3.
+      ad_beta(1,3)  =  11./6
+      ad_beta(2,3)  = -3.
+      ad_beta(3,3)  =  1.5
+      ad_beta(4,3)  = -1./3
 
-      ad_alpha(1,1)=1
+      ad_alpha(1,1) =  1.
 
-      ad_alpha(1,2)=2
-      ad_alpha(2,2)=-1
+      ad_alpha(1,2) =  2.
+      ad_alpha(2,2) = -1.
 
-      ad_alpha(1,3)=3
-      ad_alpha(2,3)=-3
-      ad_alpha(3,3)=1
+      ad_alpha(1,3) =  3.
+      ad_alpha(2,3) = -3.
+      ad_alpha(3,3) =  1.
 
       return
       end
 c-----------------------------------------------------------------------
-      subroutine evalc(cu,cm,cl,uu)
+      subroutine evalc(cu,cm,cl,uu,tt)
 
       include 'SIZE'
       include 'TOTAL'
       include 'MOR'
 
-      common /evalctmp/ ucft(0:lb),bcu(ltr),cuu(ltr)
+      common /evalctmp/ ucft(0:lb)
 
       real cu(nb)
-      real uu(0:nb)
+      real uu(0:nb),tt(0:nb)
       real cl(ic1:ic2,jc1:jc2,kc1:kc2)
       real cm(ic1:ic2,jc1:jc2)
 
@@ -395,68 +417,145 @@ c-----------------------------------------------------------------------
 
       if (ifcintp) then
          call mxm(cintp,n,uu,n+1,cu,1)
-      else if (rmode.eq.'CP ') then
-         call rzero(cu,nb)
-         do kk=1,ltr
-            bcu(kk) = vlsc2(uu,cub(1+(kk-1)*(lub+1)),nb+1)
-            cuu(kk) = vlsc2(u,cuc(1+(kk-1)*(lub+1)),nb+1)
-         enddo
-         do kk=1,ltr
-            do i=1,nb
-               cu(i)=cu(i)+cp_w(kk)*cua(i+(kk-1)*(lub))*bcu(kk)*cuu(kk)
-            enddo
-         enddo
-
-         ! debug checking
-c        do kk=1,ltr
-c           do k=1,nb+1
-c           do j=1,nb+1
-c           do i=1,nb
-c              cu(i)=cu(i)+cp_w(kk)*cua(i+(kk-1)*(lub))
-c    $         *cub(j+(kk-1)*(lub+1))*uu(j-1)
-c    $         *cuc(k+(kk-1)*(lub+1))*u(k-1)
-c           enddo
-c           enddo
-c           enddo
-c        enddo
       else
          call rzero(cu,nb)
          if (ncloc.ne.0) then
             if ((kc2-kc1).lt.64.and.(jc2-jc1).lt.64
-     $          .and.rfilter.eq.'STD') then
+     $          .and.cfloc.eq.'NONE') then
                call mxm(cl,(ic2-ic1+1)*(jc2-jc1+1),
-     $                  u(kc1),(kc2-kc1+1),cm,1)
-               call mxm(cm,(ic2-ic1+1),uu(jc1),(jc2-jc1+1),cu(ic1),1)
+     $                  uu(kc1),(kc2-kc1+1),cm,1)
+               call mxm(cm,(ic2-ic1+1),tt(jc1),(jc2-jc1+1),cu(ic1),1)
             else
-               if (rfilter.eq.'STD'.or.rfilter.eq.'EF ') then
-                  do k=kc1,kc2
-                  do j=jc1,jc2
-                  do i=ic1,ic2
-                     cu(i)=cu(i)+cl(i,j,k)*uu(j)*u(k)
-                  enddo
-                  enddo
-                  enddo
-               else if (rfilter.eq.'LER') then
-                  call copy(ucft,u,nb+1)
+               call copy(ucft,uu,nb+1)
 
-                  if (rbf.lt.0) then
-                     call pod_df(ucft(1))
-                  else if (rbf.gt.0) then
-                     call pod_proj(ucft(1),rbf)
-                  endif
-
-                  do k=kc1,kc2
-                  do j=jc1,jc2
-                  do i=ic1,ic2
-                     cu(i)=cu(i)+cl(i,j,k)*uu(j)*ucft(k)
-                  enddo
-                  enddo
-                  enddo
+               if (cfloc.eq.'CONV') then
+               if (cftype.eq.'TFUN') then
+                  call pod_proj(ucft(1),rbf,nb,'step  ')
+               else if (cftype.eq.'DIFF') then
+                  call pod_df(ucft(1))
                endif
+               endif
+
+               do k=kc1,kc2
+               do j=jc1,jc2
+               do i=ic1,ic2
+                  cu(i)=cu(i)+cl(i,j,k)*tt(j)*ucft(k)
+               enddo
+               enddo
+               enddo
             endif
          endif
          call gop(cu,work,'+  ',nb)
       endif
+
+      call nekgsync
+
+      evalc_time=evalc_time+dnekclock()-stime
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine evalc3(cu,fac_a,fac_b,fac_c,cp_weight,uu)
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      real cu(nb)
+      real uu(0:nb)
+      real ucft(0:nb)
+      real fac_a((nb+1)*ntr),fac_b((nb+1)*ntr)
+      real fac_c((nb+1)*ntr),cp_weight(ntr)
+      real bcu(ntr)
+      real cuu(ntr)
+      real tmp(ntr)
+      real tmpcu(0:nb)
+
+      common /scrc/ work(max(lub,ltb))
+
+      integer icalld
+      save    icalld
+      data    icalld /0/
+
+      if (icalld.eq.0) then
+         evalc_time=0.
+         icalld=1
+      endif
+
+      stime=dnekclock()
+
+      call rzero(cu,nb)
+      do kk=1,ntr
+         bcu(kk) = vlsc2(uu,fac_b(1+(kk-1)*(nb+1)),nb+1)
+         cuu(kk) = vlsc2(u,fac_c(1+(kk-1)*(nb+1)),nb+1)
+      enddo
+      call col4(tmp,bcu,cuu,cp_weight,ntr) 
+      call mxm(fac_a,nb+1,tmp,ntr,tmpcu,1)
+
+      call copy(cu,tmpcu,nb)
+
+      call nekgsync
+
+      evalc_time=evalc_time+dnekclock()-stime
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine evalc4(cu,fac_a,fac_b,fac_c,cp_weight,cl,cj0,c0k,uu)
+
+c     This subroutine contracts the approximated tensor from CP
+c     decomposition with two vectors
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      real cu(nb)
+      real fac_a((nb)*ntr),fac_b((nb)*ntr)
+      real fac_c((nb)*ntr),cp_weight(ntr)
+      real cl(ic1:ic2,jc1:jc2,kc1:kc2)
+      real cj0(ic1:ic2,jc1:jc2),c0k(ic1:ic2,kc1:kc2)
+      real uu(0:nb)
+
+      common /srcevalc4/ bcu(ltr),cuu(ltr),tmp(ltr),tmpcu(0:lb)
+
+      integer icalld
+      save    icalld
+      data    icalld /0/
+
+      if (icalld.eq.0) then
+         evalc_time=0.
+         icalld=1
+      endif
+
+      stime=dnekclock()
+
+      call rzero(cu,nb)
+      do kk=1,ntr
+         bcu(kk) = vlsc2(uu(1),fac_b(1+(kk-1)*(nb)),nb)
+         cuu(kk) = vlsc2(u(1),fac_c(1+(kk-1)*(nb)),nb)
+      enddo
+      call col4(tmp,bcu,cuu,cp_weight,ntr) 
+      call mxm(fac_a,nb,tmp,ntr,tmpcu(1),1)
+
+      do k=kc1,kc2
+      do i=ic1,ic2
+         cu(i)=cu(i)+c0k(i,k)*uu(0)*u(k)
+      enddo
+      enddo
+
+      do j=jc1,jc2
+      do i=ic1,ic2
+         cu(i)=cu(i)+cj0(i,j)*uu(j)*u(0)
+      enddo
+      enddo
+
+      do i=ic1,ic2
+         cu(i)=cu(i)-cj0(i,0)*uu(0)*u(0)
+      enddo
+
+c     call copy(cu,tmpcu(1),nb)
+      call add2(cu,tmpcu(1),nb)
 
       call nekgsync
 
@@ -474,6 +573,8 @@ c-----------------------------------------------------------------------
 
       include 'SIZE'
       include 'MOR'
+      include 'INPUT'
+      include 'TSTEP'
 
       common /scrrhs/ tmp(0:lb),tmp2(0:lb)
 
@@ -490,17 +591,40 @@ c-----------------------------------------------------------------------
          rhs(i)=rhs(i)+s*at0(1+i)
       enddo
 
-      call evalc(tmp(1),ctmp,ctl,ut)
-c     call add2(tmp(1),st0(1),nb)
+      if (ifadvc(2)) then
+         if (ifcp) then
+            if (ifcore) then
+               call evalc4(tmp(1),cta,ctb,ctc,cp_tw,ctl,ctj0,ct0k,ut)
+            else
+               call evalc3(tmp(1),cta,ctb,ctc,cp_tw,ut)
+            endif
+         else
+            call evalc(tmp(1),ctmp,ctl,u,ut)
+         endif
+c        call add2(tmp(1),st0(1),nb)
+         call shift(ctr,tmp(1),nb,3)
 
-      call shift3(ctr,tmp(1),nb)
+         call mxm(ctr,nb,ad_alpha(1,icount),3,tmp(1),1)
 
-      call mxm(ctr,nb,ad_alpha(1,icount),3,tmp(1),1)
+         call sub2(rhs,tmp(1),nb)
+      endif
 
-      call sub2(rhs,tmp(1),nb)
-
-      if (iftneu) call add2(rhs,st0(1),nb)
-      if (ifsource) call add2(rhs,rq,nb)
+      if (ifsource) then
+         call add2(rhs,rq,nb)
+         if (ifsrct) then
+            rqt_time_coef(3) = rqt_time_coef(2)
+            rqt_time_coef(2) = rqt_time_coef(1)
+            time = (ad_step-1)*ad_dt
+            call userq(1,1,1,1)
+            rqt_time_coef(1) = ft
+            if (ad_step .le. 4) then
+               write(6,*)'ad_step', ad_step
+               write(6,*)'extrapolation points:', rqt_time_coef(1:3)
+            endif
+            rqttcext = glsc2(ad_alpha(1,icount),rqt_time_coef,3)
+            call add2s2(rhs,rqt,rqttcext,nb)
+         endif
+      endif
 
       return
       end
@@ -511,45 +635,59 @@ c-----------------------------------------------------------------------
       include 'MOR'
 
       common /scrrhs/ tmp1(0:lb),tmp2(0:lb)
+      common /eddyma/ cedm((lb**2-1)*ledvis+1),cedvec((lb-1)*ledvis+1)
 
       real rhs(nb)
 
-      call checkera('ba1',rhs,nb,ad_step)
-
       call mxm(u,nb+1,ad_beta(2,icount),3,tmp1,1)
-      call checkera('ba2',tmp1,nb,ad_step)
       call mxm(bu,nb,tmp1(1),nb,rhs,1)
-      call checkera('ba3',rhs,nb,ad_step)
 
       call cmult(rhs,-1.0/ad_dt,nb)
-
-      call checkera('ba4',rhs,nb,ad_step)
 
       s=-1.0/ad_re
 
       do i=1,nb
          rhs(i)=rhs(i)+s*au0(1+i)
       enddo
-
-
-      call evalc(tmp1(1),ctmp,cul,u)
-      call chsign(tmp1(1),nb)
-      call checkera('ba5',tmp1(1),nb,ad_step)
-
-      if (ifbuoy) then
-         call mxm(but0,nb+1,ut,nb+1,tmp2(0),1)
-         call add2s2(tmp1(1),tmp2(1),-ad_ra,nb)
-      else if (ifforce) then
-         call add2(tmp1(1),rg(1),nb)
+      if (ifedvs) then
+         do i=1,nb
+            rhs(i)=rhs(i)-cedvec(i)
+         enddo
       endif
 
-      call shift3(fu,tmp1(1),nb)
+      if (ifcp) then
+         if (ifcore) then 
+            call evalc4(tmp1(1),cua,cub,cuc,cp_uw,cul,cuj0,cu0k,u)
+         else
+            call evalc3(tmp1(1),cua,cub,cuc,cp_uw,u)
+         endif 
+      else
+         call evalc(tmp1(1),ctmp,cul,u,u)
+      endif
+
+      call chsign(tmp1(1),nb)
+
+      if (ifbuoy) then
+         call mxm(buxt0,nb+1,ut,nb+1,tmp2(0),1)
+         call add2s2(tmp1(1),tmp2(1),-gx,nb)
+
+         call mxm(buyt0,nb+1,ut,nb+1,tmp2(0),1)
+         call add2s2(tmp1(1),tmp2(1),-gy,nb)
+
+         if (ldim.eq.3) then
+            call mxm(buzt0,nb+1,ut,nb+1,tmp2(0),1)
+            call add2s2(tmp1(1),tmp2(1),-gz,nb)
+         endif
+      else if (ifforce) then
+         call add2(tmp1(1),rf(1),nb)
+      endif
+
+      call shift(fu,tmp1(1),nb,3)
 
 
       call mxm(fu,nb,ad_alpha(1,icount),3,tmp1(1),1)
 
       call add2(rhs,tmp1(1),nb)
-      call checkera('ba5',rhs,nb,ad_step)
 
       ! artificial viscosity
 
@@ -602,10 +740,17 @@ c              tmp2(i)=log(d)
 c-----------------------------------------------------------------------
       subroutine setuavg(s1,s2,t1)
 
+      ! set average quantities involving velocity coefficients
+
+      ! s1 := <uj>
+      ! s2 := <ujxuj>
+      ! t1 := uj
+
       include 'SIZE'
       include 'MOR'
 
-      real s1(0:nb),s2(0:nb,0:nb),t1(0:nb)
+      real s1(0:nb),s2(0:nb,0:nb)
+      real t1(0:nb)
 
       if (ad_step.eq.navg_step) then
          call rzero(s1,nb+1)
@@ -631,6 +776,15 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
       subroutine settavg(s1,s2,s3,s4,t1,t2)
 
+      ! set average quantities involving temperature coefficients
+
+      ! s1 := <uj>
+      ! s2 := <ujxtj>
+      ! s3 := <tjxuj>
+      ! s4 := <tjxtj>
+      ! t1 := uj
+      ! t2 := tj
+
       include 'SIZE'
       include 'MOR'
 
@@ -644,13 +798,13 @@ c-----------------------------------------------------------------------
          call rzero(s4,(nb+1)**2)
       endif
 
-      call add2(s1,ut,nb+1)
+      call add2(s1,t2,nb+1)
 
       do j=0,nb
       do i=0,nb
          s2(i,j)=s2(i,j)+t1(i)*t2(j)
-         s2(i,j)=s3(i,j)+t1(j)*t2(i)
-         s2(i,j)=s4(i,j)+t2(j)*t2(i)
+         s3(i,j)=s3(i,j)+t1(j)*t2(i)
+         s4(i,j)=s4(i,j)+t2(j)*t2(i)
       enddo
       enddo
 
@@ -660,64 +814,6 @@ c-----------------------------------------------------------------------
          call cmult(s2,s,(nb+1)**2)
          call cmult(s3,s,(nb+1)**2)
          call cmult(s4,s,(nb+1)**2)
-      endif
-
-      return
-      end
-c-----------------------------------------------------------------------
-      subroutine setuj(s1,s2,t1)
-
-      include 'SIZE'
-      include 'MOR'
-
-      real s1(0:nb,6),s2(0:nb,0:nb,6),t1(0:nb,3)
-
-      if (ad_step.eq.(navg_step+1)) then
-         call copy(s1(0,1),t1(0,3),nb+1)
-         call copy(s1(0,2),t1(0,2),nb+1)
-         call copy(s1(0,3),t1(0,1),nb+1)
-      endif
-      if (ad_step.eq.ad_nsteps) then
-         call copy(s1(0,4),t1(0,3),nb+1)
-         call copy(s1(0,5),t1(0,2),nb+1)
-         call copy(s1(0,6),t1(0,1),nb+1)
-         do k=1,6
-            call mxm(s1(0,k),nb+1,s1(0,k),1,s2(0,0,k),nb+1)
-         enddo
-      endif
-
-      return
-      end
-c-----------------------------------------------------------------------
-      subroutine settj(s1,s2,s3,t1,t2)
-
-      include 'SIZE'
-      include 'MOR'
-
-      ! s1=utj,s2=uutj,s3=utuj,t1=uj,t2=ut
-
-      real s1(0:nb,6),s2(0:nb,0:nb,6),s3(0:nb,0:nb,6)
-      real t1(0:nb,6),t2(0:nb,3)
-
-      if (ad_step.eq.(navg_step+1)) then
-         call copy(s1(0,1),t2(0,3),nb+1)
-         call copy(s1(0,2),t2(0,2),nb+1)
-         call copy(s1(0,3),t2(0,1),nb+1)
-      endif
-
-      if (ad_step.eq.ad_nsteps) then
-         call copy(s1(0,4),t2(0,3),nb+1)
-         call copy(s1(0,5),t2(0,2),nb+1)
-         call copy(s1(0,6),t2(0,1),nb+1)
-
-         do k=1,6
-         do j=0,nb
-         do i=0,nb
-            s2(i,j,k)=t1(i,k)*s1(j,k)
-            s3(i,j,k)=t1(j,k)*s1(i,k)
-         enddo
-         enddo
-         enddo
       endif
 
       return
@@ -733,6 +829,9 @@ c-----------------------------------------------------------------------
       if (ad_step.le.3) then
          call cmult2(flu,b,ad_beta(1,ad_step)/ad_dt,nb*nb)
          call add2s2(flu,a,ad_diff,nb*nb)
+         if (ifhelm) then
+            call add2s2(flu,b,ad_mu,nb*nb)
+         endif
       endif
          
       return
@@ -997,6 +1096,443 @@ c-----------------------------------------------------------------------
             call copy(invhelm(1,2),invhh(1),nb*nb)
          endif
       endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_ucoef_in_ext(s1,s2,t1)
+
+      ! Set the coefficient of residual involving summation in
+      ! extrapolation term.  Take convection term as an example and
+      ! consider only EXT3 is used The coefficient can be written as:
+      ! The inner product of [c_0 c_1 c_2 c_3 c_4 c_5] and
+      ! [{u**2}^{J_0-2} {u**2}^_{J_0-1} {u**2}^{J_0} {u**2}^{J-2}
+      ! {u**2}^{J-1} {u**2}^{J}] plus sum^J_{j=J_0-2} {u**2}^j. This
+      ! subroutine computes sum^J_{j=J_0-2} {u**2}^j
+
+      ! s1:=ua_ext
+      ! s2:=u2a_ext
+      ! t1:=u
+
+      include 'SIZE'
+      include 'MOR'
+
+      real s1(0:nb),s2(0:nb,0:nb),t1(0:nb,3)
+      real tmp(0:nb)
+
+      character*3 rfilter
+
+      logical ifbdf1,ifbdf2,ifbdf3
+
+      ifbdf1 = navg_step.eq.1.and.ad_step.eq.navg_step+1
+      ifbdf2 = navg_step.eq.2.and.ad_step.eq.navg_step
+      ifbdf3 = navg_step.ge.3.and.ad_step.eq.navg_step-1
+
+      rfilter='   '
+      if (cfloc.eq.'CONV'.and.cftype.eq.'TFUN') rfilter='LER'
+
+      if (ifbdf1.or.ifbdf2.or.ifbdf3) then
+         call rzero(s1,(nb+1))
+         call rzero(s2,(nb+1)**2)
+         call copy(s1,t1(0,3),nb+1)
+         call add2(s1,t1(0,2),nb+1)
+         call add2(s1,t1(0,1),nb+1)
+         if (rfilter.eq.'LER'.and.rbf.gt.0) then
+            do k=1,3
+            call copy(tmp,t1(0,k),nb+1)
+            call pod_proj(tmp(1),rbf,nb,'step  ')
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+t1(i,k)*tmp(j)
+            enddo
+            enddo
+            enddo
+         else
+            do k=1,3
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+t1(i,k)*t1(j,k)
+            enddo
+            enddo
+            enddo
+         endif
+      else
+
+         call add2(s1,t1(0,1),nb+1)
+         if (rfilter.eq.'LER'.and.rbf.gt.0) then
+            call copy(tmp,t1(0,1),nb+1)
+            call pod_proj(tmp(1),rbf,nb,'step  ')
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+t1(i,1)*tmp(j)
+            enddo
+            enddo
+         else
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+t1(i,1)*t1(j,1)
+            enddo
+            enddo
+         endif
+      endif
+
+      if (ad_step.eq.ad_nsteps) then
+         s=1./real(ad_nsteps-navg_step+1)
+         call cmult(s1,s,nb+1)
+         call cmult(s2,s,(nb+1)**2)
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_tcoef_in_ext(s1,s2,t1,t2)
+
+      ! Set the coefficient of residual involving summation in
+      ! extrapolation term.  Take buoyance term as an example and
+      ! consider only EXT3 is used The coefficient can be written as:
+      ! The inner product of [c_0 c_1 c_2 c_3 c_4 c_5] and [T^{J_0-2}
+      ! T^_{J_0-1} T^{J_0} T^{J-2} T^{J-1} T^{J}] plus sum^J_{j=J_0-2}
+      ! T^j. This subroutine computes sum^J_{j=J_0-2} T^j
+
+      ! s1:=uta_ext
+      ! s2:=utua_ext
+      ! t1:=u
+      ! t2:=ut
+
+      include 'SIZE'
+      include 'MOR'
+
+      real s1(0:nb),s2(0:nb,0:nb)
+      real t1(0:nb,3),t2(0:nb,3)
+      real tmp(0:nb)
+
+      logical ifbdf1,ifbdf2,ifbdf3
+
+      character*3 rfilter
+
+      ifbdf1 = navg_step.eq.1.and.ad_step.eq.navg_step+1
+      ifbdf2 = navg_step.eq.2.and.ad_step.eq.navg_step
+      ifbdf3 = navg_step.ge.3.and.ad_step.eq.navg_step-1
+
+      rfilter='   '
+      if (cfloc.eq.'CONV'.and.cftype.eq.'TFUN') rfilter='LER'
+
+      if (ifbdf1.or.ifbdf2.or.ifbdf3) then
+         call rzero(s1,(nb+1))
+         call rzero(s2,(nb+1)**2)
+         call copy(s1,t2(0,3),nb+1)
+         call add2(s1,t2(0,2),nb+1)
+         call add2(s1,t2(0,1),nb+1)
+         if (rfilter.eq.'LER'.and.rbf.gt.0) then
+            do k=1,3
+            call copy(tmp,t1(0,k),nb+1)
+            call pod_proj(tmp(1),rbf,nb,'step  ')
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+tmp(j)*t2(i,k)
+            enddo
+            enddo
+            enddo
+         else
+            do k=1,3
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+t1(j,k)*t2(i,k)
+            enddo
+            enddo
+            enddo
+         endif
+      else
+
+         call add2(s1,t2(0,1),nb+1)
+         if (rfilter.eq.'LER'.and.rbf.gt.0) then
+            call copy(tmp,t1(0,1),nb+1)
+            call pod_proj(tmp(1),rbf,nb,'step  ')
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+tmp(j)*t2(i,1)
+            enddo
+            enddo
+         else
+            do j=0,nb
+            do i=0,nb
+               s2(i,j)=s2(i,j)+t1(j,1)*t2(i,1)
+            enddo
+            enddo
+         endif
+      endif
+
+
+      if (ad_step.eq.ad_nsteps) then
+         s=1./real(ad_nsteps-navg_step+1)
+         call cmult(s1,s,nb+1)
+         call cmult(s2,s,(nb+1)**2)
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine setuj(s1,s2,s3,t1)
+
+      ! set quantities in velocity residual
+      ! store uj and ujfilter at different
+      ! time by u and compute u2j by uj or ujfilter
+
+      ! s1 := uj
+      ! s2 := u2j
+      ! s3 := ujfilter
+      ! t1 := u
+
+      include 'SIZE'
+      include 'MOR'
+
+      real s1(0:nb,8),s2(0:nb,0:nb,8)
+      real s3(0:nb,8),t1(0:nb,5)
+
+      character*3 rfilter
+
+      rfilter='   '
+      if (cfloc.eq.'CONV'.and.cftype.eq.'TFUN') rfilter='LER'
+
+      mj=5
+      nj=3
+
+      if (ad_step.eq.(navg_step+1)) then
+         do i=1,mj
+            call copy(s1(0,i),t1(0,mj+1-i),nb+1)
+         enddo
+      else if (ad_step.eq.ad_nsteps) then
+         do i=1,nj
+            call copy(s1(0,mj+i),t1(0,nj+1-i),nb+1)
+         enddo
+         do k=1,mj+nj
+            call copy(s3(0,k),s1(0,k),nb+1)
+            if (rfilter.eq.'LER'.and.rbf.gt.0)
+     $         call pod_proj(s3(1,k),rbf,nb,'step  ')
+            call mxm(s1(0,k),nb+1,s3(0,k),1,s2(0,0,k),nb+1)
+         enddo
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine settj(s1,s2,s3,t1,t2)
+
+      ! set quantities in temperature residual
+      ! store utj at different time by ut and compute
+      ! uutj, utuj with utj and ujfilter
+
+      ! s1 := utj
+      ! s2 := uutj
+      ! s3 := utuj
+      ! t1 := ujfilter from setuj
+      ! t2 := ut
+
+      include 'SIZE'
+      include 'MOR'
+
+      real s1(0:nb,8),s2(0:nb,0:nb,8),s3(0:nb,0:nb,8)
+      real t1(0:nb,8),t2(0:nb,5)
+
+      mj=5
+      nj=3
+
+      if (ad_step.eq.(navg_step+1)) then
+         do i=1,mj
+            call copy(s1(0,i),t2(0,mj+1-i),nb+1)
+         enddo
+      else if (ad_step.eq.ad_nsteps) then
+         do i=1,nj
+            call copy(s1(0,mj+i),t2(0,nj+1-i),nb+1)
+         enddo
+         do k=1,mj+nj
+         do j=0,nb
+         do i=0,nb
+            s2(i,j,k)=t1(i,k)*s1(j,k)
+            s3(i,j,k)=t1(j,k)*s1(i,k)
+         enddo
+         enddo
+         enddo
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine setfj(s1,s2)
+
+      ! set quantities in source term for residual
+      ! store rqj and rqtj at different
+      ! time by user specified function ft in userq
+
+      ! s1:=rqj
+      ! s2:=rqtj
+
+      include 'SIZE'
+      include 'TSTEP'
+      include 'MOR'
+
+      real s1(6),s2(6)
+
+      logical ifbdf1,ifbdf2,ifbdf3
+
+      ifbdf1 = navg_step.eq.1.and.ad_step.eq.navg_step+1
+      ifbdf2 = navg_step.eq.2.and.ad_step.eq.navg_step
+      ifbdf3 = navg_step.ge.3.and.ad_step.eq.navg_step-1
+
+      if (ifbdf1.or.ifbdf2.or.ifbdf3) then
+         s1(1) = 1
+         s1(2) = 1
+         s1(3) = 1
+         time = (ad_step-2)*ad_dt
+         call userq(1,1,1,1)
+         s2(1) = ft
+         time = (ad_step-1)*ad_dt
+         call userq(1,1,1,1)
+         s2(2) = ft
+         time = (ad_step)*ad_dt
+         call userq(1,1,1,1)
+         s2(3) = ft
+      endif
+
+      if (ad_step.eq.ad_nsteps) then
+         s1(4) = 1
+         s1(5) = 1
+         s1(6) = 1
+         time = (ad_step-2)*ad_dt
+         call userq(1,1,1,1)
+         s2(4) = ft
+         time = (ad_step-1)*ad_dt
+         call userq(1,1,1,1)
+         s2(5) = ft
+         time = (ad_step)*ad_dt
+         call userq(1,1,1,1)
+         s2(6) = ft
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_favg_in_ext(s1,s2)
+
+      ! Set the coefficient of residual involving summation in
+      ! extrapolating source term.
+
+      ! s1:=rqa
+      ! s2:=rqta
+
+      include 'SIZE'
+      include 'TSTEP'
+      include 'MOR'
+
+      real s1,s2
+
+      logical ifbdf1,ifbdf2,ifbdf3
+
+      ifbdf1 = navg_step.eq.1.and.ad_step.eq.navg_step+1
+      ifbdf2 = navg_step.eq.2.and.ad_step.eq.navg_step
+      ifbdf3 = navg_step.ge.3.and.ad_step.eq.navg_step-1
+
+      if (ifbdf1.or.ifbdf2.or.ifbdf3) then
+         s1 = 0.0
+         s2 = 0.0
+         s1 = 3
+         time = (ad_step-2)*ad_dt
+         call userq(1,1,1,1)
+         s2 = s2 + ft
+         time = (ad_step-1)*ad_dt
+         call userq(1,1,1,1)
+         s2 = s2 + ft
+         time = (ad_step)*ad_dt
+         call userq(1,1,1,1)
+         s2 = s2 + ft
+      else
+         s1 = s1 + 1.
+         time = (ad_step)*ad_dt
+         call userq(1,1,1,1)
+         s2 = s2 + ft
+      endif
+
+      if (ad_step.eq.ad_nsteps) then
+         s=1./real(ad_nsteps-navg_step+1)
+         s1 = s1*s
+         s2 = s2*s
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_time_avg_resid_coef
+
+      ! currently only support for BDF3/EXT3
+      ! compute the coefficient in the time-averaged residual
+
+      include 'SIZE'
+      include 'MOR'
+      if (ifrom(1)) call set_time_avg_resid_coef_u
+      if (ifrom(2)) call set_time_avg_resid_coef_t
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_time_avg_resid_coef_u
+
+      ! currently only support for BDF3/EXT3
+      ! compute the coefficient in the time-averaged velocity residual
+
+      include 'SIZE'
+      include 'MOR'
+
+      call setuj(uj,u2j,ujfilter,u)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_time_avg_resid_coef_t
+
+      ! currently only support for BDF3/EXT3
+      ! compute the coefficient in the time-averaged temperature
+      ! residual
+
+      include 'SIZE'
+      include 'MOR'
+
+      call settj(utj,uutj,utuj,ujfilter,ut)
+
+      if (ifsource) then
+         call set_favg_in_ext(rqa,rqta)
+         call setfj(rqj,rqtj)
+      endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine addeddy(flu,cedm,cedvec,cl,uu)
+
+      include 'SIZE'
+      include 'TOTAL'
+      include 'MOR'
+
+      real uu(0:nb), flu(nb,nb)
+      real cedm(nb,nb),cedvec(nb)
+
+      real tmp(nb,0:nb)
+      real cl(ic1:ic2,jc1:jc2,kc1:kc2)
+      real cm(ic1:ic2,jc1:jc2)
+
+      call rzero(tmp,nb*(nb+1))
+
+      call mxm(cl,(ic2-ic1+1)*(jc2-jc1+1),uu(kc1),(kc2-kc1+1),cm,1)
+
+      do j=jc1,jc2
+      do i=ic1,ic2
+      tmp(i,j) = tmp(i,j)+cm(i,j)
+      enddo
+      enddo
+      call gop(tmp,stmp,'+  ',nb*(nb+1))
+      call copy(cedm,tmp(1,1),nb*nb)
+      call copy(cedvec,tmp(1,0),nb)
+
+      call add2(flu,cedm,nb*nb)
 
       return
       end

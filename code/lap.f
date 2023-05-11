@@ -120,7 +120,7 @@ c-----------------------------------------------------------------------
       call rone(ones,n)
 
       call setgram
-      call setevec
+c     call setevec
 
       call setbases
 
@@ -154,7 +154,8 @@ c     call snorm(tb)
 
 c      call asnap
 
-      if (rmode.eq.'ALL'.or.rmode.eq.'OFF') call dump_all
+      if (rmode.eq.'ALL'.or.rmode.eq.'OFF'.or.rmode.eq.'AEQ')
+     $   call dump_all
 
       ad_step = istep
       jfield=ifield

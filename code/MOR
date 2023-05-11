@@ -2,83 +2,96 @@ c     parameters and common blocks for MOR
 
       include 'LMOR'
 
-      common /morgram/ ug(ls,ls,0:ldimt1)
-      common /moreig/ evec(ls,ls,0:ldimt1),eval(ls,0:ldimt1)
+      common /morgram/ ug(ls,ls),eval(ls),eval2(ls)
 
-      common /morconvect/ c1v(lxd*lyd*lzd*lelm,0:lub),
-     $                    c2v(lxd*lyd*lzd*lelm,0:lub),
-     $                    c3v(lxd*lyd*lzd*lelm,0:lub),
-     $                    u1v(lxd*lyd*lzd*lelm,0:lub),
-     $                    u2v(lxd*lyd*lzd*lelm,0:lub),
-     $                    u3v(lxd*lyd*lzd*lelm,0:lub)
+      common /morvisc/ unu(lx1*ly1*lz1*lelm,0:lub),
+     $                 tnu(lx1*ly1*lz1*lelm,0:ltb)
 
       common /morbasis/ ub(lx1*ly1*lz1*lelm,0:lub),
      $                  vb(lx1*ly1*lz1*lelm,0:lub),
      $                  wb(lx1*ly1*lz1*lelm,0:lub),
+     $                  uvwb(lx1*ly1*lz1*lelm,ldim,0:lub),
      $                  pb(lx2*ly2*lz2*lelm,0:lpb),
-     $                  tb(lx1*ly1*lz1*lelm,0:ltb)
+     $                  tb(lx1*ly1*lz1*lelm,0:ltb,ldimt)
 
       common /moric/ uic(lx1*ly1*lz1*lelm),
      $               vic(lx1*ly1*lz1*lelm),
      $               wic(lx1*ly1*lz1*lelm),
-     $               pic(lx1*ly1*lz1*lelm),
+     $               pic(lx2*ly2*lz2*lelm),
      $               tic(lx1*ly1*lz1*lelm)
 
-      common /morcoef/ uk(0:lub,lsu),tk(0:ltb,lst),timek(lcs)
-      common /morcoef2/ ukp(0:lub,lsu),tkp(0:ltb,lst)
+      common /morcoef/ uk((lub+1)*lsu),tk((ltb+1)*lst),timek(lcs),
+     $                 edk((lub+1)*lsu)
+      common /morcoef2/ ukp((lub+1)*lsu),tkp((ltb+1)*lst)
 
       common /morusnap/ us0(lx1*ly1*lz1*lelm,ldim,lsu)
-      common /morpsnap/ ps(lx2*ly2*lz2*lelm,lsp)
-      common /mortsnap/ ts0(lx1*ly1*lz1*lelm,lst)
+      common /morpsnap/ prs(lx2*ly2*lz2*lelm,lsp)
+      common /mortsnap/ ts0(lx1*ly1*lz1*lelm,lst,ldimt)
+
+      common /morsnaptmp/ snapt(lx1*ly1*lz1*lelm,ldim,lsu)
 
       common /morforce/ fx(lx1*ly1*lz1*lelm),
      $                  fy(lx1*ly1*lz1*lelm),
      $                  fz(lx1*ly1*lz1*lelm),
-     $                  gx(lx1*ly1*lz1*lelm),
-     $                  gy(lx1*ly1*lz1*lelm),
-     $                  gz(lx1*ly1*lz1*lelm),
-     $                  qq(lx1*ly1*lz1*lelm)
+     $                  qq(lx1*ly1*lz1*lelm),
+     $                  qqxyz(lx1*ly1*lz1*lelm),gx,gy,gz
 
       common /morbuoy/ bux,buy,buz,bu_angle
 
-      common /moruavg/ ua(0:lub),u2a((lub+1)**2),uas(0:lub),uvs(0:lub)
+      common /moruavg/ ua(0:lub),u2a((lub+1)**2),uas(0:lub),uvs(0:lub),
+     $                 u2a_ext((lub+1)**2),ua_ext(0:lub)
       common /mortavg/ uta(0:ltb),uuta((lub+1)*(ltb+1)),
      $                 utua((ltb+1)*(lub+1)),
-     $                 ut2a((ltb+1)*(ltb+1)),tas(0:ltb),tvs(0:ltb)
+     $                 ut2a((ltb+1)*(ltb+1)),tas(0:ltb),tvs(0:ltb),
+     $                 utua_ext((ltb+1)**2),uta_ext(0:ltb)
 
       common /mormsk/ dmask(lx1,ly1,lz1,lelm,lmsk+1)
+
+      common /morprop/ brhom1(lx1,ly1,lz1,lelm),vdm1(lx1,ly1,lz1,lelm)
 
       parameter (lcglo=2*lub*(lub+1)*(lub+1))
       parameter (lcloc=lcglo/lpmin+1)
 
       common /morfops/ hlm(lb**2,2),hinv(lb**2,2),hlu(lb**2,2),
-     $                 wt(lb**2,2)
+     $                 wt(max(lb**2,2),2)
       common /morifops/ ihlu(lb,2),ihlu2(lb,2)
 
       common /morvops/ au0((lub+1)**2),bu0((lub+1)**2),
-     $                 au(lub**2),bu(lub**2),cul((lcloc-1)*lmu+1)
+     $                 au(lub**2),bu(lub**2),cul((lcloc-1)*lmu+1),
+     $                 aules((lub+1)**3)
 
       common /mortops/ at0((ltb+1)**2),bt0((ltb+1)**2),
      $                 at(ltb**2),bt(ltb**2),
      $                 ctl((lcloc-1)*lmt+1),
-     $                 st0(0:ltb)
+     $                 st0(0:ltb),atles((ltb+1)**3),
+     $                 e1(0:ltb),e2(0:ltb),e3(0:lub,0:ltb)
+
+      common /moreops/ aue((lub+1)**3),ate((ltb+1)**3)
 
       common /morbc/ gn(lx1,ly1,lz1,lelt)
 
       common /morcpl/ but0((lub+1)*(ltb+1)),buc(lub*(ltb+1)),cintp(1)
-      common /morrb/ but0_x((lub+1)*(ltb+1)),but0_y((lub+1)*(ltb+1)),
-     $               but0_z((lub+1)*(ltb+1))
+      common /morrb/ buxt0((lub+1)*(ltb+1)),buyt0((lub+1)*(ltb+1)),
+     $               buzt0((lub+1)*(ltb+1))
 
-      common /morvsol/ u(0:(lub+1)*3-1),uj(0:lub,6),
-     $                 u2((lub+1)**2),u2j(0:lub,0:lub,6)
+      common /morvsol/ u(0:(lub+1)*5-1),uj(0:(lub+1)*8-1),
+     $                 u2j(0:((lub+1)**2)*8-1),
+     $                 ujfilter(0:(lub+1)*8-1)
 
 
-      common /mortsol/ ut(0:(ltb+1)*3-1),utj(0:ltb,6),
-     $                 uutj(0:lub,0:ltb,6),utuj(0:ltb,0:lub,6),
-     $                 ut2((ltb+1)*(lub+1)),ut2j(0:ltb,0:ltb,6)
+      common /mortsol/ ut(0:(ltb+1)*5-1),utj(0:(ltb+1)*8-1),
+     $                 uutj(0:(lub+1)*(ltb+1)*8-1),
+     $                 utuj(0:(ltb+1)*(lub+1)*8-1),
+     $                 ut2((ltb+1)*(lub+1)),
+     $                 ut2j(0:(ltb+1)*(ltb+1)*8-1)
+
+      common /morintp/ xintp(lintp),yintp(lintp),zintp(lintp),
+     $                 tbintp(lintp*(ltb+1))
 
       common /morrhs/ cvr(lub*3),ctr(ltb*3),usa(0:lub),rg(lub),
-     $                rf(lub),fu(lub,3),rq(ltb)
+     $                rf(lub),fu(lub,3),rq(ltb),rqt(ltb),
+     $                rqt_time_coef(3),rqj(6),rqtj(6),
+     $                rqa,rqta,ft
 
       common /morsig_diag/ siga_diag(0:lub),sigb_diag(0:lub),
      $                     sigc_diag(0:lub,0:lub)
@@ -87,6 +100,9 @@ c     parameters and common blocks for MOR
      $                    thc_diag(0:lub,0:lub)
 
       common /mortmp/ ctmp((lub*(lub+1)*(lub+1))/lpmin+1)
+
+      common /morftmp/ fldtmp(lx1*ly1*lz1*lelm,ldim+1)
+
       common /moritmp/ itmp1(lub),itmp2(lub)
       common /morrtmp/ rtmp1(lub,lub),rtmp2(lb,lb),rtmp3(lb,lb)
       common /morstmp/ stmp(lb+1,ls)
@@ -94,18 +110,21 @@ c     parameters and common blocks for MOR
       common /morfld/ wm1(lx1*ly1*lz1*lelm)
       common /morqoi/ rnus,rdgx(0:lub),rdgy(0:lub),rdgz(0:lub)
 
+      common /mornus/ tbulkn(0:ltb,0:lub),tbulkd(0:ltb,0:lub),
+     $                tsurf(0:ltb),ttmean(0:lb)
+
       common /mordrag/ fd1(ldim*(lub+1)),fd2(ldim*(lub+1)**2),
      $                 fd3(ldim*(lub+1))
       common /mordarray/ sobj(lx1,ly1,lz1,lelm),g(lx1,ly1,lz1,lelm)
       common /morpar/ ad_dt,ad_re,ad_pe,ad_alpha(3,3),ad_beta(4,3),
-     $                tbeta,ad_ra,rktol
+     $                tbeta,ad_ra,rktol,ad_mu,podrat
 
       integer ad_nsteps,ad_iostep,ad_step,ad_qstep
       common /moripar/ ad_nsteps,ad_iostep,ad_step,ad_qstep,inus,
-     $                 navg_step,mb,nb,nplay
+     $                 navg_step,mb,nb,nbo,nplay,nintp,iaug
 
-      common /morivars/ i0,j0,k0,i1,j1,k1,ns,navg,ncloc,npr,npart,
-     $                  isolve,ic1,ic2,jc1,jc2,kc1,kc2
+      common /morivars/ i0,j0,k0,i1,j1,k1,nns,ns,nskip,navg,ncloc,npr,
+     $                  npart,isolve,ic1,ic2,jc1,jc2,kc1,kc2,idirf
 
       common /morlu/ fluv(lub**2),flut(lub**2)
       common /morilu/ irv(lub),icv(lub),irt(lub),ict(lub),ipiv(lub)
@@ -126,34 +145,47 @@ c     parameters and common blocks for MOR
 
       ! Error Indicator ! TODO: cleanup multi-dimensional arrays
 
-      common /eires/ xi(lx1*ly1*lz1*lelm,lres),theta(lres),
-     $               sigma(lres,lres),alphaj(6),betaj(6),
+      common /eires/ xi(lx1*ly1*lz1*lelm,lres),mor_theta(lres),
+     $               mor_sigma(lres,lres),alphaj(8),betaj(8),
      $               sigtmp(lres,lres)
 
-      common /eiivar/ nres
+      common /eiivar/ nres,nres_u,nres_t,its(3)
       common /eivar/ res,eierr
 
-      common /eiresu/ xi_u(lx1*ly1*lz1*lelm,ldim,lres),theta_u(lres),
-     $                sigma_u(lres,lres)
+      common /eiresu/ xi_u(lx1*ly1*lz1*lelm,ldim,lres_u),
+     $                xi_t(lx1*ly1*lz1*lelm,lres_t),
+     $                sigma_u(lres_u**2),sigma_t(lres_t**2),
+     $                theta_u(lres_u),theta_t(lres_t),
+     $                eh_u(lx1*ly1*lz1*lelm,ldim),
+     $                eh_t(lx1*ly1*lz1*lelm),
+     $                eh_p(lx1*ly1*lz1*lelm,ldim),
+     $                res_u(lx1*ly1*lz1*lelm,ldim),
+     $                res_t(lx1*ly1*lz1*lelm)
+      common /eirhs/ riesz_ru(lx1*ly1*lz1*lelm,ldim,lres_u),
+     $               riesz_rt(lx1*ly1*lz1*lelm,lres_t)
 
       ! Flags
 
       logical ifl2,ifvort,ifstep,ifpart,ifavg0,ifplay,
-     $        ifcdrag,ifrms,ifread,ifforce,ifpod(0:ldimt1),
-     $        ifbuoy,ifrom(0:ldimt1),ifcintp,iffastc,ifcnuss,ifctke,
+     $        ifcdrag,ifrms,ifread,ifreads(0:ldimt1),ifforce,
+     $        ifpod(0:ldimt1),ifbuoy,ifrom(0:ldimt1),
+     $        ifcintp,iffastc,ifcnuss,ifctke,
      $        iffasth,ifavisc,ifsource,ifei,ifsub0,ifrecon,iftneu,
-     $        ifdecpl
+     $        ifdecpl,ifcore,ifquad,ifhelm,ifsrct,iftflux,ifcomb,ifpb,
+     $        ifcp,ifcflow
 
       common /morflags/ ifl2,ifvort,ifstep,ifavg0,ifplay,
      $                  ifcdrag,ifrms,ifread,ifforce,ifpod,
      $                  ifbuoy,ifrom,ifcintp,iffastc,ifcnuss,ifctke,
      $                  iffasth,ifavisc,ifsource,ifei,ifsub0,ifrecon,
-     $                  iftneu,ifdecpl
+     $                  iftneu,ifdecpl,ifcore,ifquad,ifhelm,ifsrct,
+     $                  iftflux,ifcomb,ifpb,ifcp,ifcflow
 
       real last_time,misc_time,lu_time,
      $     copt_time,quasi_time,lnsrch_time,
      $     ulast_time,tlast_time,postu_time,postt_time
-     $     compf_time,compgf_time,invhm_time
+     $     compf_time,compgf_time,invhm_time,
+     $     cp_time
 
       common /mortime/ step_time,last_time,misc_time,evalc_time,
      $                 solve_time,lu_time,
@@ -161,7 +193,8 @@ c     parameters and common blocks for MOR
      $                 tstep_time,tlast_time,tsolve_time,
      $                 ustep_time,ulast_time,
      $                 postu_time,postt_time,post_time
-     $                 compf_time,compgf_time,invhm_time
+     $                 compf_time,compgf_time,invhm_time,
+     $                 cp_time
 
       integer ucopt_count,tcopt_count
       real num_galu,num_galt
@@ -174,8 +207,10 @@ c     parameters and common blocks for MOR
 
       character*6 cts
       character*5 scopt
-      character*3 ips,eqn,rmode,rfilter
-      common /morchar/ ips,eqn,rmode,rfilter,cts,scopt
+      character*3 ips,rmode
+      character*4 cftype,cfloc,eqn
+
+      common /morchar/ ips,eqn,rmode,cts,scopt,cftype,cfloc
 
       common /morid/ ones(lx1*ly1*lz1*lelm),zeros(lx1*ly1*lz1*lelm)
       common /morrk/ grk(lb*6*2),urki(lb*2),urko(lb*2),
@@ -186,6 +221,57 @@ c     parameters and common blocks for MOR
       common /morifilt/  rbf
 
       ! Tensor Decomposition 
-      real cua,cub,cuc,cp_w
-      common /cp_decomp/ cua(lub*ltr),cub((lub+1)*ltr),cuc((lub+1)*ltr),
-     $                   cp_w(ltr)
+
+      real cua,cub,cuc,cp_uw
+      real cta,ctb,ctc,cp_tw
+      integer ntr
+
+      common /cp_decomp/ cua((lub+1)*ltr),cub((lub+1)*ltr),
+     $                   cuc((lub+1)*ltr),cp_uw(ltr),
+     $                   cta((lub+1)*ltr),ctb((lub+1)*ltr),
+     $                   ctc((lub+1)*ltr),cp_tw(ltr)
+      common /cp_rank/ ntr
+      common /cp_aux/  cu0k((lub+1)**2), cuj0((lub+1)**2),
+     $                 ct0k((lub+1)**2), ctj0((lub+1)**2)
+
+      ! Average Equation
+
+      common /moravg/ uafld(lx1*ly1*lz1*lelt,ldim,lbavg),
+     $                uufld(lx1*ly1*lz1*lelt,ldim,lbavg),
+     $                uvfld(lx1*ly1*lz1*lelt,ldim,lbavg),
+     $                utfld(lx1*ly1*lz1*lelt,ldim,lbavg),
+     $                pafld(lx2*ly2*lz2*lelt,lbavg),
+     $                tafld(lx1*ly1*lz1*lelt,lbavg),
+     $                udfld(lx1*ly1*lz1*lelt,ldim,lbavg),
+     $                tdfld(lx1*ly1*lz1*lelt,lbavg)
+
+      common /morflucp/ nbavg
+
+      common /morflucf/ flucv(lx1*ly1*lz1*lelm,ldim,lbavg),
+     $                  fluct(lx1*ly1*lz1*lelm,lbavg),
+     $                  flucut(lx1*ly1*lz1*lelm,lbavg),
+     $                  flucvt(lx1*ly1*lz1*lelm,lbavg),
+     $                  flucwt(lx1*ly1*lz1*lelm,lbavg),
+     $                  upup(lx1*ly1*lz1*lelm,ldim,lbavg),
+     $                  upvp(lx1*ly1*lz1*lelm,ldim,lbavg),
+     $                  tptp(lx1*ly1*lz1*lelm,lbavg),
+     $                  uptp(lx1*ly1*lz1*lelm,ldim,lbavg)
+
+      common /mordiff2/ psit(lx1*ly1*lz1*lelm,ldim*ldim,ldim,lbavg)
+
+      common /morflucop/ fv_op(lbavg*lbavg),ft_op(lbavg*lbavg)
+
+      ! Eddy Viscosity
+
+      logical ifedvs
+
+      common /moredflags/ ifedvs
+
+      common /moredops/ cedd((lcloc-1)*lmu+1)
+
+      common /moresol/ edv(0:(lub+1)*5-1),edvua((lub+1)**2)
+
+      ! RBF
+      common /morrbf/ rbfmat((ls**2-1)*ledvis+1),
+     $                rbfwt((ls*lb-1)*ledvis+1),
+     $                rbf_sigma((lb-1)*ledvis+1),anch((ls-1)*ledvis+1)

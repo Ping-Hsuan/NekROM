@@ -38,8 +38,10 @@ c-----------------------------------------------------------------------
 
          fd(1)=fd(1)-(ak*abveck(1,1,k)+bk*abveck(2,1,k))/real(2*k)
          fd(2)=fd(2)+(ak*abveck(1,2,k)+bk*abveck(2,2,k))/real(2*k)
-c        write (6,*) 'ak pdrag',k,ak,bk,fd(1),fd(2)
+c        write (6,*) 'ak pdrag',k,ak,bk,fd(1),fd(2),lk
       enddo
+      call gop(fd(1),wk1,'+  ',1)
+      call gop(fd(2),wk1,'+  ',1)
 
       return
       end
@@ -174,7 +176,7 @@ c-----------------------------------------------------------------------
       common /scrk1/ ux(lt),uy(lt),uz(lt),w(lub+1)
 
       if (ifcdrag) then
-         if (rmode.eq.'ON '.or.rmode.eq.'ONB') then
+         if (rmode.eq.'ON '.or.rmode.eq.'ONB'.or.rmode.eq.'CP ') then
             call read_serial(rdgx,nb+1,'qoi/rdgx ',w,nid)
             call read_serial(rdgy,nb+1,'qoi/rdgy ',w,nid)
             if (ldim.eq.3) call read_serial(rdgz,nb+1,'qoi/rdgz ',w,nid)
@@ -259,33 +261,49 @@ c-----------------------------------------------------------------------
 
       common /cnus1/ tbn(0:lb,0:lb),tbd(0:lb),tsa(0:lb)
       common /cnus2/ qwall(0:lb)
-      common /scrk0/ tx(lt),ty(lt),tz(lt)
+      common /scrk0/ tx(lx1,ly1,lz1,lelt),
+     $               ty(lx1,ly1,lz1,lelt),
+     $               tz(lx1,ly1,lz1,lelt)
 
       if (inus.eq.1) then
-         do j=0,nb
-            do i=0,nb
-               call ctbulk_num(tbn(i,j),ub(1,i),vb(1,i),wb(1,i),tb(1,j))
+         if (rmode.eq.'ON '.or.rmode.eq.'ONB') then
+            call read_mat_serial(tbn,nb+1,nb+1,
+     $         'qoi/tbn ',mb+1,mb+1,rtmp1,nid)
+            call read_serial(tbd,nb+1,'qoi/tbd ',rtmp1,nid)
+            call read_serial(tsa,nb+1,'qoi/tsa ',rtmp1,nid)
+         else
+            do j=0,nb
+               do i=0,nb
+                  call ctbulk_num(tbn(i+j*(nb+1),0),
+     $               ub(1,i),vb(1,i),wb(1,i),tb(1,j,1))
+               enddo
+               call ctbulk_den(tbd(j),ub(1,j),vb(1,j),wb(1,j))
+               call ctsurf(tsa(j),tb(1,j,1))
             enddo
-            call ctbulk_den(tbd(j),ub(1,j),vb(1,j),wb(1,j))
-            call ctsurf(tsa(j),tb(1,j))
-         enddo
 
-         do i=0,nb
-            if (nio.eq.0) write (6,*) i,tsa(i),'tsa'
-         enddo
+            call dump_serial(tsa,nb+1,'qoi/tsa ',nid)
 
-         do j=0,nb
-         do i=0,nb
-            if (nio.eq.0) write (6,*) i,j,tbn(i,j),'tbn'
-         enddo
-         enddo
+            do i=0,nb
+               if (nio.eq.0) write (6,*) i,tsa(i),'tsa'
+            enddo
 
-         do i=0,nb
-            if (nio.eq.0) write (6,*) i,tbd(i),'tbd'
-         enddo
+            call dump_serial(tbn,(nb+1)**2,'qoi/tbn ',nid)
+
+            do j=0,nb
+            do i=0,nb
+               if (nio.eq.0) write (6,*) i,j,tbn(i+j*(nb+1),0),'tbn'
+            enddo
+            enddo
+
+            call dump_serial(tbd,nb+1,'qoi/tbd ',nid)
+
+            do i=0,nb
+               if (nio.eq.0) write (6,*) i,tbd(i),'tbd'
+            enddo
+         endif
       else if (inus.eq.2) then
          do i=0,nb
-            call gradm1(tx,ty,tz,tb(1,i))
+            call gradm1(tx,ty,tz,tb(1,i,1))
 
             eps=1.e-6
             ta=0.
@@ -323,7 +341,7 @@ c-----------------------------------------------------------------------
       else if (inus.eq.3) then
          tbn(0,0)=2.
          do j=0,nb
-            call ctsurf3(tsa(j),tb(1,j))
+            call ctsurf3(tsa(j),tb(1,j,1))
          enddo
 
          do i=0,nb
@@ -333,7 +351,7 @@ c-----------------------------------------------------------------------
          call rone(ones,lx1*ly1*lz1*nelt)
          if (rmode.ne.'ON ') then
          do i=0,nb
-            call gradm1(tx,ty,tz,tb(1,i))
+            call gradm1(tx,ty,tz,tb(1,i,1))
 
             eps=1.e-3
             ta=0.
@@ -371,7 +389,7 @@ c-----------------------------------------------------------------------
          call rone(ones,lx1*ly1*lz1*nelt)
          if (rmode.ne.'ON ') then
          do i=0,nb
-            call gradm1(tx,ty,tz,tb(1,i))
+            call gradm1(tx,ty,tz,tb(1,i,1))
 
             eps=1.e-3
             ta=0.
@@ -399,14 +417,69 @@ c-----------------------------------------------------------------------
 
             ta=glsum(ta,1)
             a=glsum(a,1)
-            write(6,*)a,'surface area'
             qwall(i)=ta/2
+            if(nio.eq.0) write(6,*)qwall(i),'surface'
          enddo
          call dump_serial(qwall,nb+1,'qoi/qwall ',nid)
          else
          call read_serial(qwall,nb+1,'qoi/qwall ',rtmp1,nid)
          endif
+      else if (inus.eq.6) then
+         iobj=1
+
+         do i=0,nb
+            call gradm1(tx,ty,tz,tb(1,i,1))
+            a=0.
+            s=0.
+
+            do imem=1,nmember(iobj)
+               ieg=object(iobj,imem,1)
+               ifc=object(iobj,imem,2)
+               ie=gllel(ieg)
+               call facind(kx1,kx2,ky1,ky2,kz1,kz2,lx1,ly1,lz1,ifc)
+               l=1
+
+               do iz=kz1,kz2
+               do iy=ky1,ky2
+               do ix=kx1,kx2
+                  a=a+area(l,1,ifc,ie)
+                  s=s+area(l,1,ifc,ie)*(unx(l,1,ifc,ie)*tx(ix,iy,iz,ie)+
+     $                                  uny(l,1,ifc,ie)*ty(ix,iy,iz,ie)+
+     $                                  unz(l,1,ifc,ie)*tz(ix,iy,iz,ie))
+                  l=l+1
+               enddo
+               enddo
+               enddo
+            enddo
+
+            s=glsum(s,1)
+            a=glsum(a,1)
+            qwall(i)=s/a
+
+            call dump_serial(qwall,nb+1,'qoi/qwall ',nid)
+         enddo
       endif
+
+c     if (iftflux) then
+c        do j=0,nbavg
+c        do i=0,nbavg
+c           if (idirf.eq.1) then
+c              call calc_tbulk(tbulkn(i,j),tbulkd(i,j),tb(1,i),ub(1,j))
+c           else if (idirf.eq.2) then
+c              call calc_tbulk(tbulkn(i,j),tbulkd(i,j),tb(1,i),vb(1,j))
+c           else if (idirf.eq.3) then
+c              call calc_tbulk(tbulkn(i,j),tbulkd(i,j),tb(1,i),wb(1,j))
+c           endif
+c        enddo
+c        enddo
+
+c        do i=0,nbavg
+c           call calc_tsurf(tsurf(i),tb(1,i))
+c           call calc_tmean(ttmean(i),tb(1,i))
+c           call calc_sterm(st0(i),tb(1,i))
+c           write (6,*) i,st0(i),'st0'
+c        enddo
+c     endif
 
       return
       end
@@ -418,7 +491,7 @@ c-----------------------------------------------------------------------
 
       common /nusselt/ fpmask(lx1,ly1,lz1,lelt),ffmask(2*ldim,lelt)
 
-      call savg(tsurf,a_surf,tt,1,'W  ')  ! tbar on wall
+      call savg(tsurf,a_surf,tt,2,'f  ')  ! tbar on wall
 
       return
       end
@@ -648,6 +721,7 @@ c-----------------------------------------------------------------------
 
       if (inus.eq.1) then
          qsurf=1.
+         diam=1.0
 
          rhocp=param(7)
          cond=param(8)
@@ -689,6 +763,9 @@ c-----------------------------------------------------------------------
          rnus=vlsc2(qwall,ut,nb+1)
          if (nio.eq.0) write (6,*) ad_step,time,rnus,'nus'
       else if (inus.eq.5) then
+         rnus=vlsc2(qwall,ut,nb+1)
+         if (nio.eq.0) write (6,*) ad_step,time,rnus,'nus'
+      else if (inus.eq.6) then
          rnus=vlsc2(qwall,ut,nb+1)
          if (nio.eq.0) write (6,*) ad_step,time,rnus,'nus'
       endif
@@ -889,55 +966,73 @@ c-----------------------------------------------------------------------
       return
       end
 c-----------------------------------------------------------------------
-      subroutine interp_t(scalar,xyz,n,s)
-c
-c     evaluate scalar for list of points xyz
-c
+      subroutine gfldi(fi,f,x,y,z,n,mdim)
+
+      ! generic field interpolation
+
+      ! fi      := interpolated field
+      ! f       := original field
+      ! <x,y,z> := interpolation points
+      ! n       := number of interpolation points
+      ! mdim    := dimension of f
+
       include 'SIZE'
       include 'TOTAL'
 
-      real scalar(n),xyz(ldim,n)
-      real s(lx1,ly1,lz1,lelt)
+      real fi(n,mdim),f(lx1,ly1,lz1,lelt,mdim),x(n),y(n),z(n)
 
-      real    rwk(INTP_NMAX,ldim+1) ! r, s, t, dist2
-      integer iwk(INTP_NMAX,3)      ! code, proc, el
-      save    rwk, iwk
+      integer ih
+      save    ih
+      data    ih /0/
 
-      integer intp_h
-      save    intp_h
+      common /rwk_intp/ rwk(INTP_NMAX,ldim+1)
+      common /iwk_intp/ iwk(INTP_NMAX,3)
 
-      common /rwk_intp/ 
-     $       fwrk(lx1*ly1*lz1*lelt,ldim),
-     $       fpts(ldim*INTP_NMAX),
-     $       pts(ldim*INTP_NMAX)
+      if (n.gt.INTP_NMAX) call exitti ('n > INTP_NMAX in gfldi!$',n)
 
-      integer icalld,e
-      save    icalld
-      data    icalld /0/
+      if (ih.eq.0) call interp_setup(ih,0.0,0,nelt)
 
-      nxyz  = nx1*ny1*nz1
-      ntot  = nxyz*nelt
+      call interp_nfld(fi,f,mdim,x,y,z,n,iwk,rwk,INTP_NMAX,.true.,ih)
 
-      if (n.gt.INTP_NMAX) call exitti ('n > INTP_NMAX in interp_v!$',n)
-      
-      if (nelgt.ne.nelgv) call exitti
-     $   ('nelgt.ne.nelgv not yet supported in interp_v!$',nelgv)
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine interp_s(si,s,xyz,n)
 
-      do i=1,n ! ? not moving -> save?
-         pts(i)     = xyz(1,i)
-         pts(i + n) = xyz(2,i)
-         if (if3d) pts(i + n*2) = xyz(3,i)
-      enddo
+      ! scalar field interpolation
 
-      if (icalld.eq.0) then
-        icalld = 1
-        call interp_setup(intp_h,0.0,0,nelt)
-      endif
+      ! si   := interpolated field
+      ! s    := original scalar field
+      ! xyz  := interpolation points
+      ! n    := number of interpolation points
 
-      ! interpolate
-      call interp_nfld(scalar,s,1,pts(1),pts(1+n),pts(2*n+1),
-     $                 n,iwk,rwk,INTP_NMAX,.true.,intp_h)
+      include 'SIZE'
 
+      common /rwk_intp_pts/ x(INTP_NMAX),y(INTP_NMAX),z(INTP_NMAX)
+      real si(n),s(lx1,ly1,lz1,lelt),xyz(ldim,n)
+
+      call splitvec(x,y,z,xyz,ldim,n)
+      call gfldi(si,s,x,y,z,n,1)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine interp_v(vi,v,xyz,n)
+
+      ! vector field interpolation
+
+      ! vi   := interpolated field
+      ! v    := original vector field
+      ! xyz  := interpolation points
+      ! n    := number of interpolation points
+
+      include 'SIZE'
+
+      common /rwk_intp_pts/ x(INTP_NMAX),y(INTP_NMAX),z(INTP_NMAX)
+      real vi(n,ldim),v(lx1,ly1,lz1,lelt,ldim),xyz(ldim,n)
+
+      call splitvec(x,y,z,xyz,ldim,n)
+      call gfldi(vi,v,x,y,z,n,ldim)
 
       return
       end
@@ -1053,6 +1148,96 @@ c       call planar_avg(tbar,tb(1,i) ,igs_x) ! Contract in x+y: work=f(z)
         close(unit=iunit+100)
         enddo
    20   format(1p3e15.6)  ! time, z , tbar
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine calc_tbulk(tbulkn,tbulkd,tt,vv)
+
+      include 'SIZE'
+      include 'TOTAL'
+
+      real tt(1)
+      real vv(1)
+
+      nv=lx1*ly1*lz1*nelv
+
+      tbulkn=glsc3(tt,vv,bm1,nv)
+      tbulkd=glsc2(vv,bm1,nv)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine calc_tsurf(tsurf,tt)
+
+      include 'SIZE'
+      include 'TOTAL'
+
+      real tt(lx1,ly1,lz1,lelt)
+
+      nt=lx1*ly1*lz1*nelt
+
+      nbavg=lb
+
+      s=0.
+      a=0.
+
+      do ie=1,nelt
+      do ifc=1,2*ldim
+         call facind(kx1,kx2,ky1,ky2,kz1,kz2,lx1,ly1,lz1,ifc)
+         if (cbc(ifc,ie,2).eq.'f  ') then
+            l=0
+            do iz=kz1,kz2
+            do iy=ky1,ky2
+            do ix=kx1,kx2
+               l=l+1
+               a=a+area(l,1,ifc,ie)
+               s=s+area(l,1,ifc,ie)*tt(ix,iy,iz,ie)
+            enddo
+            enddo
+            enddo
+         endif
+      enddo
+      enddo
+
+      s=glsum(s,1)
+      a=glsum(a,1)
+
+      tsurf=s/a
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine calc_sterm(s,tf)
+
+      include 'SIZE'
+      include 'TOTAL'
+
+      real tf(lx1,ly1,lz1,lelt)
+
+      a=0.
+      s=0.
+
+      do ie=1,nelt
+      do ifc=1,2*ldim
+         if (cbc(ifc,ie,2).eq.'f  ') then
+            call facind(kx1,kx2,ky1,ky2,kz1,kz2,lx1,ly1,lz1,ifc)
+            l=0
+            do iz=kz1,kz2
+            do iy=ky1,ky2
+            do ix=kx1,kx2
+               l=l+1
+               a=a+area(l,1,ifc,ie)
+               s=s+area(l,1,ifc,ie)*tf(ix,iy,iz,ie)
+            enddo
+            enddo
+            enddo
+         endif
+      enddo
+      enddo
+
+      s=glsum(s,1)
+      a=glsum(a,1)
 
       return
       end
