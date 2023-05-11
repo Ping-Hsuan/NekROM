@@ -686,7 +686,7 @@ c-----------------------------------------------------------------------
          call gop(gt,gt((nsg1)**2+1),'+  ',(nsg1)**2)
          tt=dnekclock()
          do j=0,nsg1-1
-         do i=0,nsg1-1
+         do i=1,nsg1-1
             if (mid.eq.0) write (10,*) gt(1+i+j*(nsg1))
          enddo
          enddo
@@ -755,6 +755,7 @@ c-----------------------------------------------------------------------
             s=-(1./nsg)*vlsum(qu(1,i+1),nsg)
             call cadd(qu(1,i+1),s,nsg)
          enddo
+         ! In the case of avg0, the last column is linear dependent
          call rzero(qu(1,nsg+1),nsg)
       else
          call rzero(qu,nsg)
